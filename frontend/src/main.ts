@@ -176,6 +176,7 @@ app.innerHTML = `
           <p id="result-count">検索結果 0件</p>
         </div>
         <p id="result-status" class="result-status">調査記録を読み込み中です。</p>
+        <section id="detail-panel" class="detail-panel" aria-live="polite"></section>
         <div id="catalog-grid" class="catalog-grid"></div>
       </section>
 
@@ -200,6 +201,7 @@ const ui = {
   catalogTitle: document.querySelector<HTMLElement>('#catalog-title'),
   resultCount: document.querySelector<HTMLElement>('#result-count'),
   resultStatus: document.querySelector<HTMLElement>('#result-status'),
+  detailPanel: document.querySelector<HTMLElement>('#detail-panel'),
   catalogGrid: document.querySelector<HTMLElement>('#catalog-grid'),
 };
 
@@ -215,6 +217,7 @@ if (
   !ui.catalogTitle ||
   !ui.resultCount ||
   !ui.resultStatus ||
+  !ui.detailPanel ||
   !ui.catalogGrid
 ) {
   throw new Error('Required UI elements are missing.');
@@ -232,16 +235,19 @@ const uiElements = {
   catalogTitle: ui.catalogTitle,
   resultCount: ui.resultCount,
   resultStatus: ui.resultStatus,
+  detailPanel: ui.detailPanel,
   catalogGrid: ui.catalogGrid,
 };
 
 const state: {
   records: NotebookRecord[];
   filteredRecords: NotebookRecord[];
+  selectedRecordId: string | null;
   filters: Filters;
 } = {
   records: [],
   filteredRecords: [],
+  selectedRecordId: null,
   filters: {
     keyword: '',
     era: 'すべて',
@@ -532,10 +538,11 @@ function renderMapSvg(localities: LocalityDetail[]): string {
 function renderCard(record: NotebookRecord, index: number): string {
   const rotation = CARD_ROTATIONS[index % CARD_ROTATIONS.length];
   const number = String(index + 1).padStart(3, '0');
+  const isSelected = state.selectedRecordId === record.id;
   const locationText = record.localities[0]
     ? `${record.localities[0].country} / ${record.localities[0].formation}`
     : record.continentLabel;
-  const summaryText = `${record.summary.replace(/\s+/g, ' ').trim()} ${record.significance.replace(/\s+/g, ' ').trim()}`.trim();
+  const cardText = record.meaning.replace(/\s+/g, ' ').trim() || `${record.nameJa} の基本記録`;
   const tagMarkup = record.tags
     .map(
       (tag, tagIndex) =>
@@ -544,14 +551,14 @@ function renderCard(record: NotebookRecord, index: number): string {
     .join('');
 
   return `
-    <article class="catalog-card" style="transform: rotate(${rotation});">
+    <article class="catalog-card${isSelected ? ' is-selected' : ''}" style="transform: rotate(${rotation});" data-record-id="${escapeHtml(record.id)}" role="button" tabindex="0" aria-expanded="${isSelected ? 'true' : 'false'}">
       <div class="tape" aria-hidden="true"></div>
       <p class="card-number">No. ${number} / ${escapeHtml(record.classificationLabel)}</p>
       <h3>${escapeHtml(record.nameJa)}</h3>
       <p class="scientific-name">${escapeHtml(record.nameEn)}</p>
 
       <div class="skeleton-frame">
-        <span>骨格スケッチ（側面）</span>
+        <span class="skeleton-caption">骨格スケッチ（側面）</span>
         <div class="scale-bar"><i></i><strong>2m</strong></div>
       </div>
 
@@ -574,9 +581,7 @@ function renderCard(record: NotebookRecord, index: number): string {
         </div>
       </dl>
 
-      <p class="body-text">${escapeHtml(summaryText || record.meaning)}</p>
-
-      <aside class="sticky-note">${escapeHtml(record.noteText)}</aside>
+      <p class="body-text">${escapeHtml(cardText)}</p>
 
       <section class="map-frame">
         <h4>産地マップ枠</h4>
@@ -588,9 +593,115 @@ function renderCard(record: NotebookRecord, index: number): string {
   `;
 }
 
+function renderReferences(record: NotebookRecord): string {
+  if (record.references.length === 0) {
+    return '<p class="detail-empty">文献導線はまだありません。</p>';
+  }
+
+  return `
+    <ul class="detail-reference-list">
+      ${record.references
+        .map(
+          (reference) => `
+            <li>
+              <a href="${escapeHtml(reference.url)}" target="_blank" rel="noreferrer">
+                ${escapeHtml(reference.title)}
+              </a>
+              <p>${escapeHtml(`${reference.authors} / ${reference.journal} / ${reference.year}`)}</p>
+            </li>
+          `,
+        )
+        .join('')}
+    </ul>
+  `;
+}
+
+function renderLocalityNotes(record: NotebookRecord): string {
+  if (record.localities.length === 0) {
+    return '<p class="detail-empty">産地メモはまだありません。</p>';
+  }
+
+  return `
+    <ul class="detail-locality-list">
+      ${record.localities
+        .slice(0, 4)
+        .map(
+          (locality) => `
+            <li>
+              <strong>${escapeHtml(locality.label)}</strong>
+              <span>${escapeHtml(`${locality.country} / ${locality.formation} / ${locality.age}`)}</span>
+              <p>${escapeHtml(locality.note)}</p>
+            </li>
+          `,
+        )
+        .join('')}
+    </ul>
+  `;
+}
+
+function renderDetailPanel(): void {
+  const record = state.records.find((entry) => entry.id === state.selectedRecordId);
+
+  if (!record) {
+    uiElements.detailPanel.innerHTML = `
+      <div class="detail-panel-empty">
+        <p class="detail-kicker">調査メモの詳細</p>
+        <p class="detail-empty">一覧カードの付箋から詳細を開くと、外部データ要約と文献導線をここに表示します。</p>
+      </div>
+    `;
+    return;
+  }
+
+  uiElements.detailPanel.innerHTML = `
+    <article class="detail-sheet">
+      <div class="detail-sheet-head">
+        <div>
+          <p class="detail-kicker">調査メモの詳細</p>
+          <h3>${escapeHtml(record.nameJa)}</h3>
+          <p class="detail-scientific">${escapeHtml(record.nameEn)}</p>
+        </div>
+        <button type="button" class="detail-close" data-detail-close="true">一覧へ戻る</button>
+      </div>
+
+      <div class="detail-summary-block">
+        <p>${escapeHtml(record.summary)}</p>
+        <aside class="detail-research-note">${escapeHtml(record.noteText)}</aside>
+      </div>
+
+      <div class="detail-meta-grid">
+        <section class="detail-box">
+          <h4>最近の研究メモ</h4>
+          <p>${escapeHtml(record.significance)}</p>
+        </section>
+        <section class="detail-box">
+          <h4>基本データ</h4>
+          <dl class="detail-stats">
+            <div><dt>年代</dt><dd>${escapeHtml(record.period)}</dd></div>
+            <div><dt>年代幅</dt><dd>${escapeHtml(record.ageMa)}</dd></div>
+            <div><dt>体長</dt><dd>${escapeHtml(`${record.lengthMeters.toFixed(1)}m`)}</dd></div>
+            <div><dt>体重</dt><dd>${escapeHtml(formatMass(record.massEstimateKg))}</dd></div>
+          </dl>
+        </section>
+      </div>
+
+      <div class="detail-meta-grid">
+        <section class="detail-box">
+          <h4>地図表示用の産地</h4>
+          ${renderLocalityNotes(record)}
+        </section>
+        <section class="detail-box">
+          <h4>文献導線</h4>
+          ${renderReferences(record)}
+        </section>
+      </div>
+    </article>
+  `;
+}
+
 function renderCatalog(): void {
   uiElements.catalogTitle.textContent = `— 図鑑　全${state.records.length}種 —`;
   uiElements.resultCount.textContent = `検索結果 ${state.filteredRecords.length}件`;
+  renderDetailPanel();
 
   if (state.filteredRecords.length === 0) {
     uiElements.catalogGrid.innerHTML = '<p class="empty-state">該当する調査記録は見つかりませんでした。</p>';
@@ -622,6 +733,7 @@ async function bootstrap(): Promise<void> {
     const details = await Promise.all(summaries.map((summary) => fetchDetail(summary.id)));
     state.records = details.map(toNotebookRecord);
     state.filteredRecords = [...state.records];
+    state.selectedRecordId = null;
     uiElements.form.reset();
     uiElements.resultStatus.textContent = '野外調査ノートを整理しました。';
     renderControls();
@@ -644,6 +756,64 @@ uiElements.lengthRange.addEventListener('input', () => {
   updateRangeLabel();
   state.filters = readFilters();
   applyFilters();
+  if (state.selectedRecordId && !state.filteredRecords.some((record) => record.id === state.selectedRecordId)) {
+    state.selectedRecordId = null;
+  }
+  renderCatalog();
+});
+
+uiElements.form.addEventListener('reset', () => {
+  state.selectedRecordId = null;
+});
+
+uiElements.catalogGrid.addEventListener('click', (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+
+  const trigger = target.closest<HTMLElement>('.catalog-card[data-record-id]');
+  if (!trigger) {
+    return;
+  }
+
+  state.selectedRecordId = trigger.dataset.recordId ?? null;
+  renderCatalog();
+  uiElements.detailPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+
+uiElements.catalogGrid.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' && event.key !== ' ') {
+    return;
+  }
+
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+
+  const trigger = target.closest<HTMLElement>('.catalog-card[data-record-id]');
+  if (!trigger) {
+    return;
+  }
+
+  event.preventDefault();
+  state.selectedRecordId = trigger.dataset.recordId ?? null;
+  renderCatalog();
+  uiElements.detailPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+
+uiElements.detailPanel.addEventListener('click', (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+
+  if (!target.closest('[data-detail-close="true"]')) {
+    return;
+  }
+
+  state.selectedRecordId = null;
   renderCatalog();
 });
 

@@ -30,3 +30,7 @@ backend のヘルスチェックは http://localhost:3000/api/health です。
 - COD は無料で公開されている結晶構造データベースです
 - CIF の取得 URL は https://www.crystallography.net/cod/<COD_ID>.cif です
 - まずは外部の無料 API を利用し、DynamoDB などの内部キャッシュは後段で追加する想定です
+
+### 素材管理
+
+- 恐竜骨格素材の収集条件と記録表は [ASSET_LICENSE_TRACKER.md](ASSET_LICENSE_TRACKER.md) を参照
