@@ -1,53 +1,37 @@
-### 文化祭鉱石図鑑_3Dmol
+## Crystallography Explorer
 
-#### メンバーのみんなへ
-- ファイル構成などの共有します。
-- 制作する時はcloneして使ってくれ!!
+3Dmol.js ベースの試作を、TypeScript と Mol* ベースの構成へ置き換えるための土台です。
+結晶構造データは無料で公開されている COD を利用し、backend が COD の OPTIMADE API と CIF 配布 URL を扱います。
 
+<<<<<<< Updated upstream
 - ちなみに3Dmolは結晶構造の1ユニットセル（単位格子）だけが描画されるらしいからマジで表記してもつまらん
 - 今GitHubに入っているcifファイルじゃ動かない　04369a.cifファイルは動きます。
 --------
+=======
+### 構成
 
-### 使用言語 (今のところ)
-HTML/CSS <br>
-JavaScript <br>
+- frontend: Vite + TypeScript + Mol*
+- backend: Express + TypeScript
+- data source: Crystallography Open Database (COD)
+- runtime: Docker Compose
 
---------
+### 起動
 
-### 使用ライブラリ
+1. Docker Desktop を起動する
+2. ルートで docker compose up --build を実行する
+3. ブラウザで http://localhost:5173 を開く
+>>>>>>> Stashed changes
 
-- **3Dmol.js(スリーディーモル・ジェーエス)** :JavaScriptで書かれた「分子・結晶構造の3D可視化ライブラリ」
+backend のヘルスチェックは http://localhost:3000/api/health です。
 
---------
+### できること
 
-### 使い方
+- おすすめの結晶構造を一覧表示
+- 化学式または元素記号で COD を検索
+- COD の公開 CIF を Mol* で表示
 
-①Dockerを起動すること　<br>
+### メモ
 
-②該当ディレクトリでbuildすること`docker compose up -d --build` <br>
-
-③ [リンクへ飛ぶ](http://localhost:8080/)
-
-### ディレクトリ構成
-
-<pre><code>
-
-3Dmol_setting/
-├── docker-compose.yml　　　 ← docker設定
-├── index.html              ← 一覧ページ（カードやリスト形式）
-├── molecule.html           ← 詳細ページ（URLで?ID=を受け取る）
-├── data/
-│   └── molecules.json      ← 各分子の情報（ID・名前・説明・cifファイル・タイプ）
-├── cif/                    ← `.cif`ファイル格納場所
-│   ├── .cif
-│   ├── diamond.cif         ← 仮ファイル
-│   └── quartz.cif          ← 仮ファイル
-├── js/
-│   ├── main.js             ← 一覧表示・クリック処理など
-│   └── viewer.js           ← 3Dmolでcifを読み込む処理
-├── css/
-│   └── style.css           ← 全体のデザインCSS
-└── assets/
-    └── logo.png            ← ロゴや画像（任意）
-
-</code></pre>
+- COD は無料で公開されている結晶構造データベースです
+- CIF の取得 URL は https://www.crystallography.net/cod/<COD_ID>.cif です
+- まずは外部の無料 API を利用し、DynamoDB などの内部キャッシュは後段で追加する想定です

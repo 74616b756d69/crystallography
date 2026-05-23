@@ -1,9 +1,9 @@
 [
   {
-    "id": "gold",
-    "name": "金",
-    "description": "ゴールド　元素記号はau",
-    "file": "cif/bcc.cif",
+    "id": "diamond",
+    "name": "ダイヤモンド",
+    "description": "炭素が正四面体構造で結晶化している。",
+    "file": "cif/Cryolite.cif",
     "type": "cif"
   },
 
