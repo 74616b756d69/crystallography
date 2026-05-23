@@ -1,6 +1,4 @@
-import 'leaflet/dist/leaflet.css';
 import './styles.css';
-import L from 'leaflet';
 
 type GeoPoint = {
   lat: number;
@@ -15,6 +13,16 @@ type LocalitySummary = {
   coordinates: GeoPoint;
 };
 
+type ReferenceEntry = {
+  title: string;
+  authors: string;
+  year: number;
+  journal: string;
+  doi?: string;
+  url: string;
+  kind: 'original-description' | 'redescription' | 'review' | 'database';
+};
+
 type DinosaurSummary = {
   id: string;
   nameJa: string;
@@ -26,16 +34,6 @@ type DinosaurSummary = {
   region: string;
   summary: string;
   localities: LocalitySummary[];
-};
-
-type ReferenceEntry = {
-  title: string;
-  authors: string;
-  year: number;
-  journal: string;
-  doi?: string;
-  url: string;
-  kind: 'original-description' | 'redescription' | 'review' | 'database';
 };
 
 type LocalityDetail = LocalitySummary & {
@@ -52,22 +50,60 @@ type DinosaurDetail = Omit<DinosaurSummary, 'localities'> & {
   references: ReferenceEntry[];
 };
 
-type FiltersResponse = {
-  clades: string[];
-  subgroups: string[];
-  diets: string[];
-  periods: string[];
-  regions: string[];
+type NotebookRecord = DinosaurDetail & {
+  eraLabel: EraOption;
+  continentLabel: ContinentOption;
+  dietLabel: DietOption;
+  classificationLabel: ClassificationOption;
+  noteText: string;
+  tags: string[];
 };
 
-type ActiveFilters = {
-  q: string;
-  clade: string;
-  subgroup: string;
-  diet: string;
-  period: string;
-  region: string;
+type EraOption =
+  | 'すべて'
+  | '三畳紀'
+  | 'ジュラ紀前期'
+  | 'ジュラ紀後期'
+  | '白亜紀前期'
+  | '白亜紀後期';
+
+type ContinentOption =
+  | 'すべて'
+  | '北アメリカ'
+  | '南アメリカ'
+  | 'ヨーロッパ'
+  | 'アジア'
+  | 'アフリカ'
+  | 'オーストラリア'
+  | '南極';
+
+type DietOption = 'すべて' | '肉食' | '草食' | '雑食';
+
+type ClassificationOption =
+  | 'すべて'
+  | '獣脚類'
+  | '竜脚類'
+  | '鳥盤類'
+  | '剣竜類'
+  | '角竜類'
+  | '鎧竜類'
+  | '鴨嘴竜類';
+
+type Filters = {
+  keyword: string;
+  era: EraOption;
+  continent: ContinentOption;
+  diet: DietOption;
+  classification: ClassificationOption;
+  maxLength: number;
 };
+
+const ERA_OPTIONS: EraOption[] = ['すべて', '三畳紀', 'ジュラ紀前期', 'ジュラ紀後期', '白亜紀前期', '白亜紀後期'];
+const CONTINENT_OPTIONS: ContinentOption[] = ['すべて', '北アメリカ', '南アメリカ', 'ヨーロッパ', 'アジア', 'アフリカ', 'オーストラリア', '南極'];
+const DIET_OPTIONS: DietOption[] = ['すべて', '肉食', '草食', '雑食'];
+const CLASSIFICATION_OPTIONS: ClassificationOption[] = ['すべて', '獣脚類', '竜脚類', '鳥盤類', '剣竜類', '角竜類', '鎧竜類', '鴨嘴竜類'];
+const CARD_ROTATIONS = ['-0.4deg', '0.55deg', '-0.65deg', '0.35deg', '-0.3deg', '0.7deg'];
+const TAG_ROTATIONS = ['-0.8deg', '0.7deg', '-0.5deg', '0.6deg'];
 
 const app = document.querySelector<HTMLDivElement>('#app');
 
@@ -76,265 +112,150 @@ if (!app) {
 }
 
 app.innerHTML = `
-  <div class="shell">
-    <header class="hero">
-      <div class="hero-copy">
-        <p class="eyebrow">Dinosaur Research Atlas</p>
-        <h1>恐竜の発見地、分類、文献を一画面で追える図鑑</h1>
-        <p class="lead">
-          発見地をピンで確認しながら、竜盤類・鳥盤類などの分類で絞り込み、原記載やレビュー文献に直接たどれる古生物ポータルです。
-        </p>
-        <p class="source-note">Wikidata と PaleoBioDB のライブデータを統合して表示します。</p>
-        <div class="hero-metrics" id="hero-metrics"></div>
-      </div>
-      <section class="hero-panel">
-        <p class="panel-kicker">研究導線</p>
-        <ul class="hero-points">
-          <li>Wikidata と PBDB の外部データを統合</li>
-          <li>分類と時代で横断検索</li>
-          <li>産地ピンから地層と産出メモを確認</li>
-          <li>原記載・再記載・レビュー文献へ接続</li>
-        </ul>
-        <div class="stage-card">
-          <div class="stage-orbit"></div>
-          <div>
-            <strong>3D 展開も追加しやすい構成</strong>
-            <p>詳細パネル側に将来 Sketchfab や Three.js のモデル枠をそのまま足せます。</p>
-          </div>
+  <div class="field-notes-page">
+    <div class="page-margin-line" aria-hidden="true"></div>
+    <main class="notes-layout">
+      <header class="notes-header">
+        <div>
+          <h1>恐竜図鑑　野外記録</h1>
+          <p class="subtitle">Field Notes — Dinosaur Fossil Records</p>
         </div>
-      </section>
-    </header>
+        <p class="header-note">文化祭　展示 / 調査ノート　第一冊</p>
+      </header>
 
-    <main class="dashboard">
-      <section class="surface filter-panel">
-        <div class="section-heading">
-          <div>
-            <p class="panel-kicker">Search</p>
-            <h2>検索と分類</h2>
+      <div class="wave-divider" aria-hidden="true">${renderWave(false)}</div>
+
+      <section class="search-panel" aria-label="絞り込み検索">
+        <h2>— 絞り込み検索 —</h2>
+        <form id="filter-form" class="search-form" autocomplete="off">
+          <div class="search-row">
+            <label class="search-block search-keyword">
+              <span>キーワード</span>
+              <div class="search-inline">
+                <input id="keyword-input" name="keyword" type="text" placeholder="恐竜の名前を入力…" autocomplete="off" />
+                <button type="submit">検　索</button>
+              </div>
+            </label>
           </div>
-          <p id="result-status">初期データを読み込み中です。</p>
-        </div>
 
-        <form id="filter-form" class="filter-form">
-          <label class="field field-wide">
-            <span>キーワード</span>
-            <input id="search-input" name="q" type="search" placeholder="例: ティラノサウルス、Theropoda、Late Cretaceous" />
-          </label>
+          <div class="filter-grid">
+            <label class="search-block">
+              <span>時代</span>
+              <select id="era-select" name="era"></select>
+            </label>
 
-          <label class="field">
-            <span>大分類</span>
-            <select id="clade-select" name="clade"></select>
-          </label>
+            <label class="search-block">
+              <span>産地・大陸</span>
+              <select id="continent-select" name="continent"></select>
+            </label>
 
-          <label class="field">
-            <span>下位群</span>
-            <select id="subgroup-select" name="subgroup"></select>
-          </label>
+            <label class="search-block">
+              <span>食性</span>
+              <select id="diet-select" name="diet"></select>
+            </label>
 
-          <label class="field">
-            <span>食性</span>
-            <select id="diet-select" name="diet"></select>
-          </label>
+            <label class="search-block">
+              <span>分類</span>
+              <select id="classification-select" name="classification"></select>
+            </label>
 
-          <label class="field">
-            <span>時代</span>
-            <select id="period-select" name="period"></select>
-          </label>
-
-          <label class="field">
-            <span>地域</span>
-            <select id="region-select" name="region"></select>
-          </label>
-
-          <div class="filter-actions">
-            <button type="submit" class="primary-button">反映</button>
-            <button type="button" id="reset-button" class="ghost-button">リセット</button>
+            <label class="search-block search-range">
+              <span>大きさ（体長）</span>
+              <input id="length-range" name="maxLength" type="range" min="0" max="40" step="1" value="40" />
+              <strong id="range-value">0m 〜 40m</strong>
+            </label>
           </div>
         </form>
-
-        <div id="active-filters" class="chip-row"></div>
       </section>
 
-      <section class="surface map-panel">
-        <div class="section-heading">
-          <div>
-            <p class="panel-kicker">Map</p>
-            <h2>発見地マップ</h2>
-          </div>
-          <p>選択中の分類群に一致する産地を表示します。</p>
-        </div>
+      <div class="wave-divider wave-divider-dashed" aria-hidden="true">${renderWave(true)}</div>
 
-        <div class="atlas-frame">
-          <div id="leaflet-map" class="leaflet-map" aria-label="恐竜発見地マップ"></div>
-          <div id="empty-map" class="empty-map is-hidden">該当する発見地がありません。</div>
-          <aside class="map-legend">
-            <strong>凡例</strong>
-            <p>OpenStreetMap 上のピンを押すと産地メモを表示します。</p>
-            <ul>
-              <li>青: 竜盤類</li>
-              <li>緑: 鳥盤類</li>
-            </ul>
-          </aside>
+      <section class="catalog-section" aria-label="恐竜カード一覧">
+        <div class="catalog-headline">
+          <h2 id="catalog-title">— 図鑑　全0種 —</h2>
+          <p id="result-count">検索結果 0件</p>
         </div>
-
-        <div id="locality-note" class="locality-note">カードかピンを選ぶと産地メモがここに表示されます。</div>
+        <p id="result-status" class="result-status">調査記録を読み込み中です。</p>
+        <div id="catalog-grid" class="catalog-grid"></div>
       </section>
 
-      <section class="surface list-panel">
-        <div class="section-heading">
-          <div>
-            <p class="panel-kicker">Catalog</p>
-            <h2>対象種一覧</h2>
-          </div>
-          <p id="list-count"></p>
-        </div>
-        <div id="dinosaur-list" class="catalog-list"></div>
-      </section>
-
-      <section class="surface detail-panel">
-        <div class="section-heading">
-          <div>
-            <p class="panel-kicker">Detail</p>
-            <h2 id="detail-title">種を選択してください</h2>
-          </div>
-          <span id="detail-badge" class="detail-badge">No selection</span>
-        </div>
-
-        <p id="detail-summary" class="detail-summary">
-          左の一覧または発見地ピンから恐竜を選ぶと、分類・サイズ・発見地・文献情報を表示します。
-        </p>
-
-        <div id="detail-stats" class="detail-stats"></div>
-
-        <section>
-          <h3>発見地</h3>
-          <div id="detail-localities" class="detail-localities"></div>
-        </section>
-
-        <section>
-          <div class="detail-subhead">
-            <h3>文献</h3>
-            <span>原記載 / 再記載 / レビュー / DB</span>
-          </div>
-          <div id="detail-references" class="reference-list"></div>
-        </section>
-      </section>
+      <footer class="notes-footer">
+        <p>記録者：___________　調査日：___________</p>
+        <p>Field Notes — Fossil Record Series</p>
+      </footer>
     </main>
+    <p class="page-number">p. 01</p>
   </div>
 `;
 
-const filterForm = document.querySelector<HTMLFormElement>('#filter-form');
-const resultStatus = document.querySelector<HTMLParagraphElement>('#result-status');
-const listCount = document.querySelector<HTMLParagraphElement>('#list-count');
-const heroMetrics = document.querySelector<HTMLDivElement>('#hero-metrics');
-const dinosaurList = document.querySelector<HTMLDivElement>('#dinosaur-list');
-const mapRoot = document.querySelector<HTMLDivElement>('#leaflet-map');
-const emptyMap = document.querySelector<HTMLDivElement>('#empty-map');
-const localityNote = document.querySelector<HTMLDivElement>('#locality-note');
-const activeFilters = document.querySelector<HTMLDivElement>('#active-filters');
-const detailTitle = document.querySelector<HTMLHeadingElement>('#detail-title');
-const detailBadge = document.querySelector<HTMLSpanElement>('#detail-badge');
-const detailSummary = document.querySelector<HTMLParagraphElement>('#detail-summary');
-const detailStats = document.querySelector<HTMLDivElement>('#detail-stats');
-const detailLocalities = document.querySelector<HTMLDivElement>('#detail-localities');
-const detailReferences = document.querySelector<HTMLDivElement>('#detail-references');
-const resetButton = document.querySelector<HTMLButtonElement>('#reset-button');
-
-const selects = {
-  clade: document.querySelector<HTMLSelectElement>('#clade-select'),
-  subgroup: document.querySelector<HTMLSelectElement>('#subgroup-select'),
-  diet: document.querySelector<HTMLSelectElement>('#diet-select'),
-  period: document.querySelector<HTMLSelectElement>('#period-select'),
-  region: document.querySelector<HTMLSelectElement>('#region-select'),
+const ui = {
+  form: document.querySelector<HTMLFormElement>('#filter-form'),
+  keywordInput: document.querySelector<HTMLInputElement>('#keyword-input'),
+  eraSelect: document.querySelector<HTMLSelectElement>('#era-select'),
+  continentSelect: document.querySelector<HTMLSelectElement>('#continent-select'),
+  dietSelect: document.querySelector<HTMLSelectElement>('#diet-select'),
+  classificationSelect: document.querySelector<HTMLSelectElement>('#classification-select'),
+  lengthRange: document.querySelector<HTMLInputElement>('#length-range'),
+  rangeValue: document.querySelector<HTMLElement>('#range-value'),
+  catalogTitle: document.querySelector<HTMLElement>('#catalog-title'),
+  resultCount: document.querySelector<HTMLElement>('#result-count'),
+  resultStatus: document.querySelector<HTMLElement>('#result-status'),
+  catalogGrid: document.querySelector<HTMLElement>('#catalog-grid'),
 };
 
-const searchInput = document.querySelector<HTMLInputElement>('#search-input');
-
 if (
-  !filterForm ||
-  !resultStatus ||
-  !listCount ||
-  !heroMetrics ||
-  !dinosaurList ||
-  !mapRoot ||
-  !emptyMap ||
-  !localityNote ||
-  !activeFilters ||
-  !detailTitle ||
-  !detailBadge ||
-  !detailSummary ||
-  !detailStats ||
-  !detailLocalities ||
-  !detailReferences ||
-  !resetButton ||
-  !searchInput ||
-  !selects.clade ||
-  !selects.subgroup ||
-  !selects.diet ||
-  !selects.period ||
-  !selects.region
+  !ui.form ||
+  !ui.keywordInput ||
+  !ui.eraSelect ||
+  !ui.continentSelect ||
+  !ui.dietSelect ||
+  !ui.classificationSelect ||
+  !ui.lengthRange ||
+  !ui.rangeValue ||
+  !ui.catalogTitle ||
+  !ui.resultCount ||
+  !ui.resultStatus ||
+  !ui.catalogGrid
 ) {
   throw new Error('Required UI elements are missing.');
 }
 
-const ui = {
-  filterForm,
-  resultStatus,
-  listCount,
-  heroMetrics,
-  dinosaurList,
-  mapRoot,
-  emptyMap,
-  localityNote,
-  activeFilters,
-  detailTitle,
-  detailBadge,
-  detailSummary,
-  detailStats,
-  detailLocalities,
-  detailReferences,
-  resetButton,
-  searchInput,
-  selects: {
-    clade: selects.clade,
-    subgroup: selects.subgroup,
-    diet: selects.diet,
-    period: selects.period,
-    region: selects.region,
-  },
+const uiElements = {
+  form: ui.form,
+  keywordInput: ui.keywordInput,
+  eraSelect: ui.eraSelect,
+  continentSelect: ui.continentSelect,
+  dietSelect: ui.dietSelect,
+  classificationSelect: ui.classificationSelect,
+  lengthRange: ui.lengthRange,
+  rangeValue: ui.rangeValue,
+  catalogTitle: ui.catalogTitle,
+  resultCount: ui.resultCount,
+  resultStatus: ui.resultStatus,
+  catalogGrid: ui.catalogGrid,
 };
-
-let map: L.Map | null = null;
-let markerLayer: L.LayerGroup | null = null;
 
 const state: {
-  filters: ActiveFilters;
-  options: FiltersResponse;
-  results: DinosaurSummary[];
-  selectedId: string | null;
-  selectedDetail: DinosaurDetail | null;
-  selectedLocality: { dinosaurName: string; locality: LocalitySummary | LocalityDetail } | null;
+  records: NotebookRecord[];
+  filteredRecords: NotebookRecord[];
+  filters: Filters;
 } = {
+  records: [],
+  filteredRecords: [],
   filters: {
-    q: '',
-    clade: '',
-    subgroup: '',
-    diet: '',
-    period: '',
-    region: '',
+    keyword: '',
+    era: 'すべて',
+    continent: 'すべて',
+    diet: 'すべて',
+    classification: 'すべて',
+    maxLength: 40,
   },
-  options: {
-    clades: [],
-    subgroups: [],
-    diets: [],
-    periods: [],
-    regions: [],
-  },
-  results: [],
-  selectedId: null,
-  selectedDetail: null,
-  selectedLocality: null,
 };
+
+function renderWave(dashed: boolean): string {
+  const dash = dashed ? ' stroke-dasharray="4,3"' : '';
+  return `<svg viewBox="0 0 620 12" preserveAspectRatio="none"><path d="M0,6 C30,1 60,11 90,6 C120,1 150,11 180,6 C210,1 240,11 270,6 C300,1 330,11 360,6 C390,1 420,11 450,6 C480,1 510,11 540,6 C570,1 600,11 620,6" stroke="#8A6030" stroke-width="${dashed ? '1' : '1.5'}" fill="none" stroke-linecap="round"${dash}/></svg>`;
+}
 
 function escapeHtml(value: string): string {
   return value
@@ -345,27 +266,8 @@ function escapeHtml(value: string): string {
     .replaceAll("'", '&#39;');
 }
 
-function buildQuery(filters: ActiveFilters): string {
-  const params = new URLSearchParams();
-  Object.entries(filters).forEach(([key, value]) => {
-    if (value.trim().length > 0) {
-      params.set(key, value.trim());
-    }
-  });
-  return params.toString();
-}
-
-async function fetchFilters(): Promise<FiltersResponse> {
-  const response = await fetch('/api/dinosaurs/filters');
-  if (!response.ok) {
-    throw new Error('分類フィルタの読み込みに失敗しました。');
-  }
-  return (await response.json()) as FiltersResponse;
-}
-
-async function fetchDinosaurs(filters: ActiveFilters): Promise<DinosaurSummary[]> {
-  const query = buildQuery(filters);
-  const response = await fetch(`/api/dinosaurs${query ? `?${query}` : ''}`);
+async function fetchDinosaurs(): Promise<DinosaurSummary[]> {
+  const response = await fetch('/api/dinosaurs');
   if (!response.ok) {
     throw new Error('恐竜一覧の取得に失敗しました。');
   }
@@ -375,411 +277,345 @@ async function fetchDinosaurs(filters: ActiveFilters): Promise<DinosaurSummary[]
 async function fetchDetail(id: string): Promise<DinosaurDetail> {
   const response = await fetch(`/api/dinosaurs/${encodeURIComponent(id)}`);
   if (!response.ok) {
-    throw new Error('詳細データの取得に失敗しました。');
+    throw new Error('恐竜詳細の取得に失敗しました。');
   }
   return (await response.json()) as DinosaurDetail;
 }
 
-function populateSelect(select: HTMLSelectElement, label: string, values: string[]): void {
-  const current = select.value;
-  select.innerHTML = [`<option value="">すべての${escapeHtml(label)}</option>`]
-    .concat(values.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`))
-    .join('');
-  select.value = values.includes(current) ? current : '';
-}
-
-function renderFilters(): void {
-  populateSelect(ui.selects.clade, '分類', state.options.clades);
-  populateSelect(ui.selects.subgroup, '下位群', state.options.subgroups);
-  populateSelect(ui.selects.diet, '食性', state.options.diets);
-  populateSelect(ui.selects.period, '時代', state.options.periods);
-  populateSelect(ui.selects.region, '地域', state.options.regions);
-
-  ui.searchInput.value = state.filters.q;
-  ui.selects.clade.value = state.filters.clade;
-  ui.selects.subgroup.value = state.filters.subgroup;
-  ui.selects.diet.value = state.filters.diet;
-  ui.selects.period.value = state.filters.period;
-  ui.selects.region.value = state.filters.region;
-
-  const chips: string[] = [];
-  Object.entries(state.filters).forEach(([key, value]) => {
-    if (!value) {
-      return;
-    }
-    const labels: Record<string, string> = {
-      q: '検索',
-      clade: '分類',
-      subgroup: '下位群',
-      diet: '食性',
-      period: '時代',
-      region: '地域',
-    };
-    chips.push(`<span>${escapeHtml(labels[key])}: ${escapeHtml(value)}</span>`);
-  });
-
-  ui.activeFilters.innerHTML = chips.length > 0 ? chips.join('') : '<span>フィルタ未指定</span>';
-}
-
-function metricCards(results: DinosaurSummary[]): string {
-  const localities = results.reduce((count, item) => count + item.localities.length, 0);
-  const references = state.selectedDetail?.references.length ?? 0;
-  const cards = [
-    { label: '表示種数', value: String(results.length) },
-    { label: '表示産地', value: String(localities) },
-    { label: '文献本数', value: String(references) },
-  ];
-
-  return cards
-    .map(
-      (card) => `
-        <article>
-          <strong>${escapeHtml(card.value)}</strong>
-          <span>${escapeHtml(card.label)}</span>
-        </article>
-      `,
-    )
+function populateSelect(select: HTMLSelectElement, options: string[]): void {
+  select.innerHTML = options
+    .map((option) => `<option value="${escapeHtml(option)}">${escapeHtml(option)}</option>`)
     .join('');
 }
 
-function renderList(): void {
-  ui.listCount.textContent = `${state.results.length} taxa`;
+function mapPeriodToEra(period: string): EraOption {
+  const value = period.toLowerCase();
 
-  if (state.results.length === 0) {
-    ui.dinosaurList.innerHTML = '<p class="empty-state">条件に一致する恐竜がありません。</p>';
-    return;
+  if (value.includes('norian') || value.includes('rhaetian')) {
+    return '三畳紀';
   }
 
-  ui.dinosaurList.innerHTML = state.results
-    .map((item) => {
-      const active = item.id === state.selectedId;
-      return `
-        <button class="catalog-card${active ? ' is-active' : ''}" data-dinosaur-id="${escapeHtml(item.id)}">
-          <div class="catalog-head">
-            <div>
-              <strong>${escapeHtml(item.nameJa)}</strong>
-              <p>${escapeHtml(item.nameEn)}</p>
-            </div>
-            <span class="clade-pill ${item.clade === 'Saurischia' ? 'is-saurischia' : 'is-ornithischia'}">${escapeHtml(item.clade)}</span>
-          </div>
-          <p class="catalog-summary">${escapeHtml(item.summary)}</p>
-          <div class="meta-row">
-            <span>${escapeHtml(item.subgroup)}</span>
-            <span>${escapeHtml(item.period)}</span>
-            <span>${escapeHtml(item.region)}</span>
-          </div>
-        </button>
-      `;
-    })
-    .join('');
-
-  ui.dinosaurList.querySelectorAll<HTMLButtonElement>('[data-dinosaur-id]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const id = button.dataset.dinosaurId;
-      if (!id) {
-        return;
-      }
-      void selectDinosaur(id);
-    });
-  });
-}
-
-function ensureMap(): L.Map {
-  if (map) {
-    return map;
+  if (value.includes('hettangian') || value.includes('pliensbachian')) {
+    return 'ジュラ紀前期';
   }
 
-  map = L.map(ui.mapRoot, {
-    zoomControl: true,
-    worldCopyJump: true,
-    scrollWheelZoom: false,
-  }).setView([22, 10], 2);
-
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 7,
-    minZoom: 2,
-    attribution: '&copy; OpenStreetMap contributors',
-  }).addTo(map);
-
-  markerLayer = L.layerGroup().addTo(map);
-  requestAnimationFrame(() => {
-    map?.invalidateSize();
-  });
-
-  return map;
-}
-
-function createMarkerIcon(clade: DinosaurSummary['clade'], selected: boolean): L.DivIcon {
-  return L.divIcon({
-    className: '',
-    html: `<span class="leaflet-pin ${clade === 'Saurischia' ? 'is-saurischia' : 'is-ornithischia'}${selected ? ' is-selected' : ''}"></span>`,
-    iconSize: [22, 22],
-    iconAnchor: [11, 22],
-    popupAnchor: [0, -18],
-  });
-}
-
-function renderMap(focusSelected = false): void {
-  const activeMap = ensureMap();
-  markerLayer?.clearLayers();
-
-  const markers = state.results.flatMap((item) =>
-    item.localities.map((locality) => ({
-      dinosaur: item,
-      locality,
-      selected:
-        state.selectedLocality?.dinosaurName === item.nameJa &&
-        state.selectedLocality.locality.label === locality.label,
-    })),
-  );
-
-  ui.emptyMap.classList.toggle('is-hidden', markers.length > 0);
-
-  if (markers.length === 0) {
-    activeMap.setView([22, 10], 2);
-    return;
+  if (
+    value.includes('aalenian') ||
+    value.includes('bajocian') ||
+    value.includes('bathonian') ||
+    value.includes('callovian') ||
+    value.includes('oxfordian') ||
+    value.includes('kimmeridgian') ||
+    value.includes('tithonian')
+  ) {
+    return 'ジュラ紀後期';
   }
 
-  const bounds: L.LatLngTuple[] = [];
-  let selectedMarker: L.Marker | null = null;
-
-  markers.forEach(({ dinosaur, locality, selected }) => {
-    const latLng = L.latLng(locality.coordinates.lat, locality.coordinates.lng);
-    bounds.push([locality.coordinates.lat, locality.coordinates.lng]);
-
-    const marker = L.marker(latLng, {
-      icon: createMarkerIcon(dinosaur.clade, selected),
-      title: `${dinosaur.nameJa} ${locality.label}`,
-    });
-
-    marker.bindPopup(`
-      <div class="leaflet-popup-card">
-        <strong>${escapeHtml(dinosaur.nameJa)}</strong>
-        <p>${escapeHtml(locality.label)}</p>
-        <span>${escapeHtml(locality.formation)} / ${escapeHtml(locality.age)}</span>
-      </div>
-    `);
-
-    marker.on('click', () => {
-      state.selectedLocality = { dinosaurName: dinosaur.nameJa, locality };
-      ui.localityNote.textContent = `${dinosaur.nameJa} / ${locality.label} / ${locality.formation} / ${locality.age}`;
-      void selectDinosaur(dinosaur.id, locality.label);
-    });
-
-    marker.addTo(markerLayer!);
-
-    if (selected) {
-      selectedMarker = marker;
-    }
-  });
-
-  requestAnimationFrame(() => {
-    activeMap.invalidateSize();
-    if (focusSelected && selectedMarker) {
-      const selectedLatLng = selectedMarker.getLatLng();
-      activeMap.flyTo(selectedLatLng, Math.max(activeMap.getZoom(), 4), {
-        animate: true,
-        duration: 0.7,
-      });
-      selectedMarker.openPopup();
-      return;
-    }
-
-    if (bounds.length === 1) {
-      activeMap.setView(bounds[0], 4);
-      return;
-    }
-
-    activeMap.fitBounds(bounds, {
-      padding: [32, 32],
-      maxZoom: 4,
-    });
-  });
-}
-
-function renderHero(): void {
-  ui.heroMetrics.innerHTML = metricCards(state.results);
-}
-
-function renderDetail(detail: DinosaurDetail | null): void {
-  if (!detail) {
-    ui.detailTitle.textContent = '種を選択してください';
-    ui.detailBadge.textContent = 'No selection';
-    ui.detailSummary.textContent = '左の一覧または発見地ピンから恐竜を選ぶと、分類・サイズ・発見地・文献情報を表示します。';
-    ui.detailStats.innerHTML = '';
-    ui.detailLocalities.innerHTML = '<p class="empty-state">発見地情報はここに表示されます。</p>';
-    ui.detailReferences.innerHTML = '<p class="empty-state">文献情報はここに表示されます。</p>';
-    renderHero();
-    return;
+  if (
+    value.includes('berriasian') ||
+    value.includes('valanginian') ||
+    value.includes('barremian') ||
+    value.includes('aptian') ||
+    value.includes('albian')
+  ) {
+    return '白亜紀前期';
   }
 
-  ui.detailTitle.textContent = `${detail.nameJa} / ${detail.nameEn}`;
-  ui.detailBadge.textContent = `${detail.clade} · ${detail.subgroup}`;
-  ui.detailSummary.textContent = `${detail.summary} ${detail.significance}`;
-
-  const stats = [
-    { label: '意味', value: detail.meaning },
-    { label: '時代', value: `${detail.period} (${detail.ageMa})` },
-    { label: '食性', value: detail.diet },
-    { label: '全長', value: `${detail.lengthMeters} m` },
-    { label: '推定体重', value: `${detail.massEstimateKg.toLocaleString()} kg` },
-    { label: '地域', value: detail.region },
-  ];
-
-  ui.detailStats.innerHTML = stats
-    .map(
-      (stat) => `
-        <article>
-          <span>${escapeHtml(stat.label)}</span>
-          <strong>${escapeHtml(stat.value)}</strong>
-        </article>
-      `,
-    )
-    .join('');
-
-  ui.detailLocalities.innerHTML = detail.localities
-    .map((locality) => {
-      const selected = state.selectedLocality?.locality.label === locality.label;
-      return `
-        <button class="locality-card${selected ? ' is-selected' : ''}" data-locality-name="${escapeHtml(locality.label)}">
-          <div>
-            <strong>${escapeHtml(locality.label)}</strong>
-            <p>${escapeHtml(locality.country)} / ${escapeHtml(locality.formation)}</p>
-          </div>
-          <span>${escapeHtml(locality.age)}</span>
-          <p>${escapeHtml(locality.note)}</p>
-        </button>
-      `;
-    })
-    .join('');
-
-  ui.detailReferences.innerHTML = detail.references
-    .map((reference) => {
-      const href = reference.url;
-      const subline = [reference.authors, String(reference.year), reference.journal].join(' / ');
-      const doi = reference.doi ? `<span>DOI: ${escapeHtml(reference.doi)}</span>` : '<span>External link</span>';
-      return `
-        <a class="reference-card" href="${escapeHtml(href)}" target="_blank" rel="noreferrer">
-          <div class="reference-head">
-            <strong>${escapeHtml(reference.title)}</strong>
-            <span>${escapeHtml(reference.kind)}</span>
-          </div>
-          <p>${escapeHtml(subline)}</p>
-          ${doi}
-        </a>
-      `;
-    })
-    .join('');
-
-  ui.detailLocalities.querySelectorAll<HTMLButtonElement>('[data-locality-name]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const name = button.dataset.localityName;
-      const locality = detail.localities.find((entry) => entry.label === name);
-      if (!locality) {
-        return;
-      }
-      state.selectedLocality = { dinosaurName: detail.nameJa, locality };
-      ui.localityNote.textContent = `${detail.nameJa} / ${locality.label} / ${locality.note}`;
-      renderMap(true);
-      renderDetail(detail);
-    });
-  });
-
-  renderHero();
+  return '白亜紀後期';
 }
 
-async function selectDinosaur(id: string, preferredLocalityName?: string): Promise<void> {
-  state.selectedId = id;
-  renderList();
+function mapRegionToContinent(region: string): ContinentOption {
+  const normalized = region.toLowerCase();
 
-  try {
-    const detail = await fetchDetail(id);
-    state.selectedDetail = detail;
-
-    const preferredLocality = preferredLocalityName
-      ? detail.localities.find((entry) => entry.label === preferredLocalityName)
-      : detail.localities[0] ?? null;
-
-    if (preferredLocality) {
-      state.selectedLocality = { dinosaurName: detail.nameJa, locality: preferredLocality };
-      ui.localityNote.textContent = `${detail.nameJa} / ${preferredLocality.label} / ${preferredLocality.note}`;
-    }
-
-    renderMap(true);
-    renderDetail(detail);
-  } catch (error) {
-    ui.detailTitle.textContent = '詳細を読み込めませんでした';
-    ui.detailBadge.textContent = 'Load error';
-    ui.detailSummary.textContent = error instanceof Error ? error.message : '不明なエラーが発生しました。';
+  if (normalized.includes('north america')) {
+    return '北アメリカ';
   }
+  if (normalized.includes('south america')) {
+    return '南アメリカ';
+  }
+  if (normalized.includes('europe')) {
+    return 'ヨーロッパ';
+  }
+  if (normalized.includes('asia')) {
+    return 'アジア';
+  }
+  if (normalized.includes('africa')) {
+    return 'アフリカ';
+  }
+  if (normalized.includes('oceania') || normalized.includes('australia')) {
+    return 'オーストラリア';
+  }
+  if (normalized.includes('antarctica')) {
+    return '南極';
+  }
+  return 'すべて';
 }
 
-async function loadResults(): Promise<void> {
-  ui.resultStatus.textContent = '恐竜データを取得しています。';
-  const results = await fetchDinosaurs(state.filters);
-  state.results = results;
-  ui.resultStatus.textContent = `${results.length} 件の恐竜を表示中です。`;
-
-  const keepSelection = state.selectedId && results.some((item) => item.id === state.selectedId);
-  if (!keepSelection) {
-    state.selectedId = results[0]?.id ?? null;
-    state.selectedDetail = null;
-    state.selectedLocality = null;
+function mapDiet(diet: DinosaurDetail['diet']): DietOption {
+  if (diet === 'Carnivore') {
+    return '肉食';
   }
-
-  renderFilters();
-  renderList();
-  renderMap();
-  renderDetail(state.selectedDetail);
-
-  if (state.selectedId) {
-    await selectDinosaur(state.selectedId);
+  if (diet === 'Herbivore') {
+    return '草食';
   }
+  return '雑食';
 }
 
-function readFiltersFromForm(): ActiveFilters {
+function mapClassification(record: DinosaurDetail): ClassificationOption {
+  const subgroup = record.subgroup.toLowerCase();
+
+  if (subgroup.includes('theropoda')) {
+    return '獣脚類';
+  }
+  if (subgroup.includes('sauropodomorpha')) {
+    return '竜脚類';
+  }
+  if (subgroup.includes('stegosauria')) {
+    return '剣竜類';
+  }
+  if (subgroup.includes('ceratopsia')) {
+    return '角竜類';
+  }
+  if (subgroup.includes('ankylosauria')) {
+    return '鎧竜類';
+  }
+  if (subgroup.includes('hadrosauridae')) {
+    return '鴨嘴竜類';
+  }
+  return record.clade === 'Ornithischia' ? '鳥盤類' : '獣脚類';
+}
+
+function buildNoteText(record: DinosaurDetail): string {
+  const noteSource = record.significance || record.meaning || record.summary;
+  const trimmed = noteSource.replace(/\s+/g, ' ').trim();
+  return `最近の研究メモ: ${trimmed}`;
+}
+
+function buildTags(record: DinosaurDetail, eraLabel: EraOption, continentLabel: ContinentOption, classificationLabel: ClassificationOption): string[] {
+  return [classificationLabel, eraLabel, continentLabel, record.diet === 'Carnivore' ? '肉食性' : record.diet === 'Herbivore' ? '草食性' : '雑食性'];
+}
+
+function toNotebookRecord(record: DinosaurDetail): NotebookRecord {
+  const eraLabel = mapPeriodToEra(record.period);
+  const continentLabel = mapRegionToContinent(record.region);
+  const dietLabel = mapDiet(record.diet);
+  const classificationLabel = mapClassification(record);
+
   return {
-    q: ui.searchInput.value.trim(),
-    clade: ui.selects.clade.value,
-    subgroup: ui.selects.subgroup.value,
-    diet: ui.selects.diet.value,
-    period: ui.selects.period.value,
-    region: ui.selects.region.value,
+    ...record,
+    eraLabel,
+    continentLabel,
+    dietLabel,
+    classificationLabel,
+    noteText: buildNoteText(record),
+    tags: buildTags(record, eraLabel, continentLabel, classificationLabel),
   };
 }
 
-ui.filterForm.addEventListener('submit', (event) => {
-  event.preventDefault();
-  state.filters = readFiltersFromForm();
-  void loadResults();
-});
-
-ui.resetButton.addEventListener('click', () => {
-  state.filters = {
-    q: '',
-    clade: '',
-    subgroup: '',
-    diet: '',
-    period: '',
-    region: '',
+function readFilters(): Filters {
+  return {
+    keyword: uiElements.keywordInput.value.trim(),
+    era: uiElements.eraSelect.value as EraOption,
+    continent: uiElements.continentSelect.value as ContinentOption,
+    diet: uiElements.dietSelect.value as DietOption,
+    classification: uiElements.classificationSelect.value as ClassificationOption,
+    maxLength: Number(uiElements.lengthRange.value),
   };
-  state.selectedId = null;
-  state.selectedDetail = null;
-  state.selectedLocality = null;
-  renderFilters();
-  void loadResults();
-});
+}
+
+function updateRangeLabel(): void {
+  uiElements.rangeValue.textContent = `0m 〜 ${uiElements.lengthRange.value}m`;
+}
+
+function matchesKeyword(record: NotebookRecord, keyword: string): boolean {
+  if (!keyword) {
+    return true;
+  }
+
+  const normalized = keyword.toLowerCase();
+  const haystack = [
+    record.nameJa,
+    record.nameEn,
+    record.meaning,
+    record.summary,
+    record.significance,
+    record.subgroup,
+    record.period,
+    record.region,
+    record.localities.map((locality) => `${locality.label} ${locality.country} ${locality.formation}`).join(' '),
+  ]
+    .join(' ')
+    .toLowerCase();
+
+  return haystack.includes(normalized);
+}
+
+function applyFilters(): void {
+  state.filteredRecords = state.records.filter((record) => {
+    if (!matchesKeyword(record, state.filters.keyword)) {
+      return false;
+    }
+    if (state.filters.era !== 'すべて' && record.eraLabel !== state.filters.era) {
+      return false;
+    }
+    if (state.filters.continent !== 'すべて' && record.continentLabel !== state.filters.continent) {
+      return false;
+    }
+    if (state.filters.diet !== 'すべて' && record.dietLabel !== state.filters.diet) {
+      return false;
+    }
+    if (state.filters.classification !== 'すべて' && record.classificationLabel !== state.filters.classification) {
+      return false;
+    }
+    return record.lengthMeters <= state.filters.maxLength;
+  });
+}
+
+function formatMass(mass: number): string {
+  return `${Math.round(mass).toLocaleString()}kg`;
+}
+
+function buildMapMarker(locality: LocalityDetail): string {
+  const x = ((locality.coordinates.lng + 180) / 360) * 100;
+  const y = ((90 - locality.coordinates.lat) / 180) * 100;
+  return `<g transform="translate(${x.toFixed(2)} ${y.toFixed(2)})"><line x1="-1.8" y1="-1.8" x2="1.8" y2="1.8"/><line x1="1.8" y1="-1.8" x2="-1.8" y2="1.8"/></g>`;
+}
+
+function renderMapSvg(localities: LocalityDetail[]): string {
+  const markers = localities.slice(0, 6).map(buildMapMarker).join('');
+  return `
+    <svg viewBox="0 0 100 52" aria-label="産地マップ枠">
+      <g class="map-outline" fill="none">
+        <path d="M6 16 C8 14 11 12 15 12 C18 12 21 13 23 15 L24 18 L22 20 L19 21 L17 24 L13 24 L10 22 L8 19 L6 18 Z" />
+        <path d="M19 14 C21 11 25 9 29 8 C33 8 37 9 40 11 L41 14 L39 17 L35 18 L34 21 L30 23 L27 22 L24 19 L21 18 Z" />
+        <path d="M27 24 C29 25 31 27 32 30 C33 34 33 38 31 42 L29 45 L27 42 L26 38 L25 33 L25 28 Z" />
+        <path d="M46 13 C48 12 50 11 53 11 C55 11 57 12 58 14 L57 16 L54 16 L52 15 L49 16 L47 15 Z" />
+        <path d="M52 14 C56 11 61 9 67 9 C73 9 79 11 84 15 L87 18 L86 21 L82 22 L79 20 L75 20 L72 22 L68 22 L66 24 L62 23 L60 20 L56 19 L54 17 Z" />
+        <path d="M61 24 C63 23 66 24 68 26 C70 29 71 32 70 35 L68 37 L66 35 L65 31 L63 28 Z" />
+        <path d="M81 34 C83 34 85 35 86 37 L86 40 L84 41 L81 40 L79 38 L79 36 Z" />
+        <path d="M35 46 C41 45 48 45 55 46 C61 47 67 47 73 46" />
+      </g>
+      <g class="map-marker-group">${markers}</g>
+    </svg>
+  `;
+}
+
+function renderCard(record: NotebookRecord, index: number): string {
+  const rotation = CARD_ROTATIONS[index % CARD_ROTATIONS.length];
+  const number = String(index + 1).padStart(3, '0');
+  const locationText = record.localities[0]
+    ? `${record.localities[0].country} / ${record.localities[0].formation}`
+    : record.continentLabel;
+  const summaryText = `${record.summary.replace(/\s+/g, ' ').trim()} ${record.significance.replace(/\s+/g, ' ').trim()}`.trim();
+  const tagMarkup = record.tags
+    .map(
+      (tag, tagIndex) =>
+        `<li style="transform: rotate(${TAG_ROTATIONS[tagIndex % TAG_ROTATIONS.length]});">${escapeHtml(tag)}</li>`,
+    )
+    .join('');
+
+  return `
+    <article class="catalog-card" style="transform: rotate(${rotation});">
+      <div class="tape" aria-hidden="true"></div>
+      <p class="card-number">No. ${number} / ${escapeHtml(record.classificationLabel)}</p>
+      <h3>${escapeHtml(record.nameJa)}</h3>
+      <p class="scientific-name">${escapeHtml(record.nameEn)}</p>
+
+      <div class="skeleton-frame">
+        <span>骨格スケッチ（側面）</span>
+        <div class="scale-bar"><i></i><strong>2m</strong></div>
+      </div>
+
+      <dl class="data-grid">
+        <div>
+          <dt>生息年代</dt>
+          <dd>${escapeHtml(record.eraLabel)}</dd>
+        </div>
+        <div>
+          <dt>産地・発見地</dt>
+          <dd>${escapeHtml(locationText)}</dd>
+        </div>
+        <div>
+          <dt>体長・体重</dt>
+          <dd>${escapeHtml(`${record.lengthMeters.toFixed(1)}m / ${formatMass(record.massEstimateKg)}`)}</dd>
+        </div>
+        <div>
+          <dt>分類</dt>
+          <dd>${escapeHtml(record.dietLabel)} / ${escapeHtml(record.classificationLabel)}</dd>
+        </div>
+      </dl>
+
+      <p class="body-text">${escapeHtml(summaryText || record.meaning)}</p>
+
+      <aside class="sticky-note">${escapeHtml(record.noteText)}</aside>
+
+      <section class="map-frame">
+        <h4>産地マップ枠</h4>
+        ${renderMapSvg(record.localities)}
+      </section>
+
+      <ul class="tag-list">${tagMarkup}</ul>
+    </article>
+  `;
+}
+
+function renderCatalog(): void {
+  uiElements.catalogTitle.textContent = `— 図鑑　全${state.records.length}種 —`;
+  uiElements.resultCount.textContent = `検索結果 ${state.filteredRecords.length}件`;
+
+  if (state.filteredRecords.length === 0) {
+    uiElements.catalogGrid.innerHTML = '<p class="empty-state">該当する調査記録は見つかりませんでした。</p>';
+    return;
+  }
+
+  uiElements.catalogGrid.innerHTML = state.filteredRecords.map(renderCard).join('');
+}
+
+function renderControls(): void {
+  populateSelect(uiElements.eraSelect, ERA_OPTIONS);
+  populateSelect(uiElements.continentSelect, CONTINENT_OPTIONS);
+  populateSelect(uiElements.dietSelect, DIET_OPTIONS);
+  populateSelect(uiElements.classificationSelect, CLASSIFICATION_OPTIONS);
+
+  uiElements.keywordInput.value = state.filters.keyword;
+  uiElements.eraSelect.value = state.filters.era;
+  uiElements.continentSelect.value = state.filters.continent;
+  uiElements.dietSelect.value = state.filters.diet;
+  uiElements.classificationSelect.value = state.filters.classification;
+  uiElements.lengthRange.value = String(state.filters.maxLength);
+  updateRangeLabel();
+}
 
 async function bootstrap(): Promise<void> {
   try {
-    state.options = await fetchFilters();
-    renderFilters();
-    await loadResults();
+    uiElements.resultStatus.textContent = '調査記録を収集中です。';
+    const summaries = await fetchDinosaurs();
+    const details = await Promise.all(summaries.map((summary) => fetchDetail(summary.id)));
+    state.records = details.map(toNotebookRecord);
+    state.filteredRecords = [...state.records];
+    uiElements.form.reset();
+    uiElements.resultStatus.textContent = '野外調査ノートを整理しました。';
+    renderControls();
+    applyFilters();
+    renderCatalog();
   } catch (error) {
-    ui.resultStatus.textContent = error instanceof Error ? error.message : '初期化に失敗しました。';
-    ui.dinosaurList.innerHTML = '<p class="empty-state">バックエンド API を起動すると一覧が表示されます。</p>';
-    renderDetail(null);
+    uiElements.resultStatus.textContent = error instanceof Error ? error.message : '調査記録の読み込みに失敗しました。';
+    uiElements.catalogGrid.innerHTML = '<p class="empty-state">バックエンド API を起動すると図鑑カードを表示できます。</p>';
   }
 }
+
+uiElements.form.addEventListener('submit', (event) => {
+  event.preventDefault();
+  state.filters = readFilters();
+  applyFilters();
+  renderCatalog();
+});
+
+uiElements.lengthRange.addEventListener('input', () => {
+  updateRangeLabel();
+  state.filters = readFilters();
+  applyFilters();
+  renderCatalog();
+});
 
 void bootstrap();
