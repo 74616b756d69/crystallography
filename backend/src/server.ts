@@ -1,207 +1,710 @@
 import cors from 'cors';
 import express, { type Request, type Response } from 'express';
 
-type MaterialSummary = {
-  id: string;
-  codId: string;
+type GeoPoint = {
+  lat: number;
+  lng: number;
+};
+
+type ReferenceEntry = {
   title: string;
-  subtitle: string;
-  description: string;
-  formula: string;
-  tags: string[];
+  authors: string;
+  year: number;
+  journal: string;
+  doi?: string;
+  url: string;
+  kind: 'original-description' | 'redescription' | 'review' | 'database';
 };
 
-type MaterialDetail = MaterialSummary & {
-  cifUrl: string;
-  cifFormat: 'cif';
-  source: string;
+type LocalitySummary = {
+  label: string;
+  country: string;
+  formation: string;
+  age: string;
+  coordinates: GeoPoint;
 };
 
-type OptimadeRecord = {
+type LocalityDetail = LocalitySummary & {
+  note: string;
+};
+
+type DinosaurSummary = {
   id: string;
-  attributes?: {
-    chemical_formula_reduced?: string;
-    chemical_formula_descriptive?: string;
-    elements?: string[];
-    last_modified?: string;
-  };
+  nameJa: string;
+  nameEn: string;
+  clade: 'Saurischia' | 'Ornithischia';
+  subgroup: string;
+  diet: 'Carnivore' | 'Herbivore' | 'Omnivore';
+  period: string;
+  region: string;
+  summary: string;
+  localities: LocalitySummary[];
 };
 
-type OptimadeResponse = {
-  data?: OptimadeRecord[];
+type DinosaurDetail = Omit<DinosaurSummary, 'localities'> & {
+  meaning: string;
+  ageMa: string;
+  lengthMeters: number;
+  massEstimateKg: number;
+  significance: string;
+  localities: LocalityDetail[];
+  references: ReferenceEntry[];
+};
+
+type FilterResponse = {
+  clades: string[];
+  subgroups: string[];
+  diets: string[];
+  periods: string[];
+  regions: string[];
+};
+
+type SeedDinosaur = {
+  id: string;
+  scientificName: string;
+  pbdbName: string;
+  fallbackNameJa: string;
+  meaning: string;
+  clade: DinosaurSummary['clade'];
+  subgroup: string;
+  diet: DinosaurSummary['diet'];
+  region: string;
+  lengthMeters: number;
+  massEstimateKg: number;
+};
+
+type WikidataEntityResponse = {
+  entities?: Record<
+    string,
+    {
+      labels?: Record<string, { value: string }>;
+      descriptions?: Record<string, { value: string }>;
+    }
+  >;
+};
+
+type WikidataSearchResponse = {
+  search?: Array<{
+    id?: string;
+    label?: string;
+    description?: string;
+  }>;
+};
+
+type PbdbTaxonRecord = {
+  taxon_name?: string;
+  reference_no?: string;
+  n_occs?: number;
+  early_interval?: string;
+  late_interval?: string;
+  firstapp_max_ma?: number;
+  lastapp_min_ma?: number;
+};
+
+type PbdbTaxonResponse = {
+  records?: PbdbTaxonRecord[];
+};
+
+type PbdbOccurrenceRecord = {
+  collection_no?: string;
+  reference_no?: string;
+  early_interval?: string;
+  max_ma?: number;
+  min_ma?: number;
+  cc?: string;
+  state?: string;
+  formation?: string;
+  geological_group?: string;
+  geogcomments?: string;
+  lat?: string;
+  lng?: string;
+};
+
+type PbdbOccurrenceResponse = {
+  records?: PbdbOccurrenceRecord[];
+};
+
+type PbdbReferenceRecord = {
+  reference_no?: string;
+  reftitle?: string;
+  pubyr?: string;
+  pubtitle?: string;
+  pubvol?: string;
+  author1init?: string;
+  author1last?: string;
+  author2init?: string;
+  author2last?: string;
+  otherauthors?: string;
+  doi?: string;
+};
+
+type PbdbReferenceResponse = {
+  records?: PbdbReferenceRecord[];
+};
+
+type ExternalSnapshot = {
+  wikidataId?: string;
+  nameJa?: string;
+  description?: string;
+  pbdbTaxon?: PbdbTaxonRecord;
+  localities: LocalityDetail[];
+  references: ReferenceEntry[];
 };
 
 const app = express();
 const port = Number(process.env.PORT ?? 3000);
-const codBaseUrl = 'https://www.crystallography.net/cod';
-const optimadeBaseUrl = `${codBaseUrl}/optimade/v1/structures`;
+const cacheTtlMs = 1000 * 60 * 60 * 6;
+const detailCache = new Map<string, { expiresAt: number; value: Promise<DinosaurDetail> }>();
 
-const featuredMaterials: MaterialDetail[] = [
+const seedDinosaurs: SeedDinosaur[] = [
   {
-    id: 'carbon-diamond',
-    codId: '9012296',
-    title: 'Diamond',
-    subtitle: 'Carbon allotrope',
-    description: '炭素の共有結合ネットワークが三次元に伸びる代表的な結晶構造です。',
-    formula: 'C',
-    tags: ['featured', 'covalent'],
-    cifUrl: `${codBaseUrl}/9012296.cif`,
-    cifFormat: 'cif',
-    source: `${codBaseUrl}/9012296.html`,
+    id: 'tyrannosaurus-rex',
+    scientificName: 'Tyrannosaurus rex',
+    pbdbName: 'Tyrannosaurus rex',
+    fallbackNameJa: 'ティラノサウルス',
+    meaning: '暴君トカゲの王',
+    clade: 'Saurischia',
+    subgroup: 'Theropoda',
+    diet: 'Carnivore',
+    region: 'North America',
+    lengthMeters: 12.3,
+    massEstimateKg: 8000,
   },
   {
-    id: 'chromium-metal',
-    codId: '9012599',
-    title: 'Chromium',
-    subtitle: 'Elemental metal',
-    description: '金属クロムの結晶構造です。体心立方格子の代表例として扱えます。',
-    formula: 'Cr',
-    tags: ['featured', 'metal'],
-    cifUrl: `${codBaseUrl}/9012599.cif`,
-    cifFormat: 'cif',
-    source: `${codBaseUrl}/9012599.html`,
+    id: 'brachiosaurus-altithorax',
+    scientificName: 'Brachiosaurus',
+    pbdbName: 'Brachiosaurus altithorax',
+    fallbackNameJa: 'ブラキオサウルス',
+    meaning: '腕トカゲ',
+    clade: 'Saurischia',
+    subgroup: 'Sauropodomorpha',
+    diet: 'Herbivore',
+    region: 'North America',
+    lengthMeters: 22,
+    massEstimateKg: 35000,
   },
   {
-    id: 'halite',
-    codId: '9006378',
-    title: 'Halite',
-    subtitle: 'Rock salt',
-    description: '塩化ナトリウムの結晶構造で、イオン結晶の教材として扱いやすい例です。',
-    formula: 'NaCl',
-    tags: ['featured', 'ionic'],
-    cifUrl: `${codBaseUrl}/9006378.cif`,
-    cifFormat: 'cif',
-    source: `${codBaseUrl}/9006378.html`,
+    id: 'triceratops-horridus',
+    scientificName: 'Triceratops',
+    pbdbName: 'Triceratops horridus',
+    fallbackNameJa: 'トリケラトプス',
+    meaning: '三本角の顔',
+    clade: 'Ornithischia',
+    subgroup: 'Ceratopsia',
+    diet: 'Herbivore',
+    region: 'North America',
+    lengthMeters: 8.5,
+    massEstimateKg: 8000,
+  },
+  {
+    id: 'iguanodon-bernissartensis',
+    scientificName: 'Iguanodon',
+    pbdbName: 'Iguanodon bernissartensis',
+    fallbackNameJa: 'イグアノドン',
+    meaning: 'イグアナの歯',
+    clade: 'Ornithischia',
+    subgroup: 'Ornithopoda',
+    diet: 'Herbivore',
+    region: 'Europe',
+    lengthMeters: 10,
+    massEstimateKg: 3500,
+  },
+  {
+    id: 'spinosaurus-aegyptiacus',
+    scientificName: 'Spinosaurus',
+    pbdbName: 'Spinosaurus aegyptiacus',
+    fallbackNameJa: 'スピノサウルス',
+    meaning: 'エジプトの棘トカゲ',
+    clade: 'Saurischia',
+    subgroup: 'Theropoda',
+    diet: 'Carnivore',
+    region: 'North Africa',
+    lengthMeters: 14,
+    massEstimateKg: 7400,
+  },
+  {
+    id: 'parasaurolophus-walkeri',
+    scientificName: 'Parasaurolophus',
+    pbdbName: 'Parasaurolophus walkeri',
+    fallbackNameJa: 'パラサウロロフス',
+    meaning: '近くの隆起したトカゲ',
+    clade: 'Ornithischia',
+    subgroup: 'Hadrosauridae',
+    diet: 'Herbivore',
+    region: 'North America',
+    lengthMeters: 9.5,
+    massEstimateKg: 2500,
   },
 ];
 
 app.use(cors());
 
 app.get('/api/health', (_request: Request, response: Response) => {
-  response.json({ ok: true });
+  response.json({ ok: true, sources: ['Wikidata', 'PaleoBioDB'] });
 });
 
-app.get('/api/materials/featured', (_request: Request, response: Response) => {
-  response.json(featuredMaterials.map(toSummary));
+app.get('/api/dinosaurs/filters', async (_request: Request, response: Response<FilterResponse>) => {
+  const dinosaurs = await getAllDinosaurs();
+  response.json({
+    clades: uniqueSorted(dinosaurs.map((item) => item.clade)),
+    subgroups: uniqueSorted(dinosaurs.map((item) => item.subgroup)),
+    diets: uniqueSorted(dinosaurs.map((item) => item.diet)),
+    periods: uniqueSorted(dinosaurs.map((item) => item.period)),
+    regions: uniqueSorted(dinosaurs.map((item) => item.region)),
+  });
 });
 
-app.get('/api/materials/search', async (request: Request, response: Response) => {
-  const formula = String(request.query.formula ?? '').trim();
-  if (!formula) {
-    response.status(400).json({ message: 'formula query is required.' });
-    return;
-  }
-
+app.get('/api/dinosaurs', async (request: Request, response: Response<DinosaurSummary[] | { message: string }>) => {
   try {
-    const searchResults = await searchCod(formula);
-    response.json(searchResults);
+    const q = String(request.query.q ?? '').trim().toLowerCase();
+    const clade = String(request.query.clade ?? '').trim();
+    const subgroup = String(request.query.subgroup ?? '').trim();
+    const diet = String(request.query.diet ?? '').trim();
+    const period = String(request.query.period ?? '').trim();
+    const region = String(request.query.region ?? '').trim();
+
+    const dinosaurs = await getAllDinosaurs();
+    const results = dinosaurs.filter((item) => {
+      const matchesQuery =
+        q.length === 0 ||
+        [item.nameJa, item.nameEn, item.summary, item.subgroup, item.period, item.region]
+          .join(' ')
+          .toLowerCase()
+          .includes(q);
+
+      return (
+        matchesQuery &&
+        matchesFilter(item.clade, clade) &&
+        matchesFilter(item.subgroup, subgroup) &&
+        matchesFilter(item.diet, diet) &&
+        matchesFilter(item.period, period) &&
+        matchesFilter(item.region, region)
+      );
+    });
+
+    response.json(results.map(toSummary));
   } catch (error) {
     response.status(502).json({
-      message: error instanceof Error ? error.message : 'Failed to query COD.',
+      message: error instanceof Error ? error.message : 'Failed to load dinosaur data.',
     });
   }
 });
 
-app.get('/api/materials/:id', async (request: Request, response: Response) => {
-  const requestedId = request.params.id;
-  const featured = featuredMaterials.find((entry) => entry.id === requestedId);
-  if (featured) {
-    response.json(featured);
+app.get('/api/dinosaurs/:id', async (request: Request, response: Response<DinosaurDetail | { message: string }>) => {
+  const seed = seedDinosaurs.find((item) => item.id === request.params.id);
+  if (!seed) {
+    response.status(404).json({ message: 'Dinosaur was not found.' });
     return;
   }
 
   try {
-    const detail = await fetchCodDetail(requestedId);
+    const detail = await getDinosaurDetail(seed);
     response.json(detail);
   } catch (error) {
-    response.status(404).json({
-      message: error instanceof Error ? error.message : 'Material was not found.',
+    response.status(502).json({
+      message: error instanceof Error ? error.message : 'Failed to load dinosaur detail.',
     });
   }
 });
 
-function toSummary(material: MaterialDetail): MaterialSummary {
+async function getAllDinosaurs(): Promise<DinosaurDetail[]> {
+  const results = await Promise.allSettled(seedDinosaurs.map((seed) => getDinosaurDetail(seed)));
+  return results.map((result, index) => {
+    if (result.status === 'fulfilled') {
+      return result.value;
+    }
+
+    const seed = seedDinosaurs[index];
+    console.error(`Failed to load dinosaur detail for ${seed.id}:`, result.reason);
+    return buildFallbackDetail(seed);
+  });
+}
+
+async function getDinosaurDetail(seed: SeedDinosaur): Promise<DinosaurDetail> {
+  const cached = detailCache.get(seed.id);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value.catch((error) => {
+      detailCache.delete(seed.id);
+      throw error;
+    });
+  }
+
+  const value = buildDinosaurDetail(seed).catch((error) => {
+    detailCache.delete(seed.id);
+    console.error(`Falling back for ${seed.id}:`, error);
+    return buildFallbackDetail(seed);
+  });
+  detailCache.set(seed.id, { expiresAt: Date.now() + cacheTtlMs, value });
+  return value;
+}
+
+async function buildDinosaurDetail(seed: SeedDinosaur): Promise<DinosaurDetail> {
+  const snapshot = await loadExternalSnapshot(seed);
+  const pbdbTaxon = snapshot.pbdbTaxon;
+  const period = buildPeriodLabel(pbdbTaxon);
+  const ageMa = buildAgeLabel(pbdbTaxon);
+  const occurrenceCount = pbdbTaxon?.n_occs ?? snapshot.localities.length;
+  const summary = buildSummary(seed, snapshot.description, occurrenceCount, period);
+  const significance = buildSignificance(seed, occurrenceCount, snapshot.localities.length, snapshot.references.length);
+
   return {
-    id: material.id,
-    codId: material.codId,
-    title: material.title,
-    subtitle: material.subtitle,
-    description: material.description,
-    formula: material.formula,
-    tags: material.tags,
+    id: seed.id,
+    nameJa: snapshot.nameJa ?? seed.fallbackNameJa,
+    nameEn: seed.scientificName,
+    meaning: seed.meaning,
+    clade: seed.clade,
+    subgroup: seed.subgroup,
+    diet: seed.diet,
+    period,
+    ageMa,
+    lengthMeters: seed.lengthMeters,
+    massEstimateKg: seed.massEstimateKg,
+    region: seed.region,
+    summary,
+    significance,
+    localities: snapshot.localities.length > 0 ? snapshot.localities : [fallbackLocality(seed)],
+    references: snapshot.references.length > 0 ? snapshot.references : fallbackReferences(seed),
   };
 }
 
-function normalizeLabel(value: string): string {
-  if (!value) {
-    return 'Unknown material';
+async function loadExternalSnapshot(seed: SeedDinosaur): Promise<ExternalSnapshot> {
+  const [wikidataResult, pbdbTaxonResult, pbdbOccurrencesResult] = await Promise.allSettled([
+    fetchWikidataEntity(seed.scientificName),
+    fetchPbdbTaxon(seed.pbdbName),
+    fetchPbdbOccurrences(seed.pbdbName),
+  ]);
+
+  const pbdbTaxon = pbdbTaxonResult.status === 'fulfilled' ? pbdbTaxonResult.value : undefined;
+  const occurrences = pbdbOccurrencesResult.status === 'fulfilled' ? pbdbOccurrencesResult.value : [];
+  const localities = buildLocalities(occurrences);
+
+  const referenceNos = new Set<string>();
+  if (pbdbTaxon?.reference_no) {
+    referenceNos.add(pbdbTaxon.reference_no);
   }
+  occurrences.forEach((occurrence) => {
+    if (occurrence.reference_no && referenceNos.size < 5) {
+      referenceNos.add(occurrence.reference_no);
+    }
+  });
 
-  if (value === value.toUpperCase()) {
-    return value;
-  }
+  const fetchedReferences = await Promise.allSettled([...referenceNos].map((referenceNo) => fetchPbdbReference(referenceNo)));
+  const literature = fetchedReferences
+    .flatMap((entry, index) => {
+      if (entry.status !== 'fulfilled' || !entry.value) {
+        return [];
+      }
+      return [toReferenceEntry(entry.value, index === 0 ? 'original-description' : 'review')];
+    })
+    .filter(Boolean);
 
-  return value
-    .toLowerCase()
-    .split(/\s+/)
-    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
-    .join(' ');
-}
-
-function buildSummaryFromRecord(record: OptimadeRecord, formulaQuery: string): MaterialSummary {
-  const codId = record.id;
-  const formula = record.attributes?.chemical_formula_reduced ?? formulaQuery;
-  const descriptive = record.attributes?.chemical_formula_descriptive ?? formula;
-  const elements = record.attributes?.elements ?? [];
+  const wikidata = wikidataResult.status === 'fulfilled' ? wikidataResult.value : undefined;
+  const databaseReferences = buildDatabaseReferences(seed, pbdbTaxon, wikidata?.wikidataId);
 
   return {
-    id: `cod-${codId}`,
-    codId,
-    title: normalizeLabel(descriptive),
-    subtitle: elements.length > 0 ? `Elements: ${elements.join(', ')}` : 'COD structure',
-    description: `COD ${codId} の公開 CIF を表示します。`,
-    formula,
-    tags: ['search', 'cod'],
+    wikidataId: wikidata?.wikidataId,
+    nameJa: wikidata?.nameJa,
+    description: wikidata?.description,
+    pbdbTaxon,
+    localities,
+    references: [...literature, ...databaseReferences],
   };
 }
 
-async function searchCod(formula: string): Promise<MaterialSummary[]> {
-  const exactFormulaFilter = `chemical_formula_reduced=\"${formula}\"`;
-  const elementFilter = formula.length <= 2 ? `elements HAS ALL \"${formula}\"` : exactFormulaFilter;
-  const url = `${optimadeBaseUrl}?filter=${encodeURIComponent(elementFilter)}&page_limit=12&response_fields=chemical_formula_reduced,chemical_formula_descriptive,elements,last_modified`;
-
-  const request = await fetch(url);
-  if (!request.ok) {
-    throw new Error('COD search request failed.');
-  }
-
-  const payload = (await request.json()) as OptimadeResponse;
-  return (payload.data ?? []).map((record) => buildSummaryFromRecord(record, formula));
+function toSummary(detail: DinosaurDetail): DinosaurSummary {
+  return {
+    id: detail.id,
+    nameJa: detail.nameJa,
+    nameEn: detail.nameEn,
+    clade: detail.clade,
+    subgroup: detail.subgroup,
+    diet: detail.diet,
+    period: detail.period,
+    region: detail.region,
+    summary: detail.summary,
+    localities: detail.localities.map((locality) => ({
+      label: locality.label,
+      country: locality.country,
+      formation: locality.formation,
+      age: locality.age,
+      coordinates: locality.coordinates,
+    })),
+  };
 }
 
-async function fetchCodDetail(id: string): Promise<MaterialDetail> {
-  const codId = id.startsWith('cod-') ? id.replace('cod-', '') : id;
-  const url = `${optimadeBaseUrl}?filter=${encodeURIComponent(`id=\"${codId}\"`)}&page_limit=1&response_fields=chemical_formula_reduced,chemical_formula_descriptive,elements`;
-  const request = await fetch(url);
-  if (!request.ok) {
-    throw new Error('COD detail request failed.');
+function buildLocalities(records: PbdbOccurrenceRecord[]): LocalityDetail[] {
+  const deduped = new Map<string, LocalityDetail>();
+
+  records.forEach((record) => {
+    const lat = Number(record.lat ?? '');
+    const lng = Number(record.lng ?? '');
+    if (Number.isNaN(lat) || Number.isNaN(lng)) {
+      return;
+    }
+
+    const label = buildLocalityLabel(record);
+    const key = record.collection_no ?? `${label}:${lat}:${lng}`;
+    if (deduped.has(key)) {
+      return;
+    }
+
+    deduped.set(key, {
+      label,
+      country: normalizeCountry(record.cc, record.state),
+      formation: record.formation ?? record.geological_group ?? 'Unknown formation',
+      age: record.early_interval ?? 'Unknown interval',
+      coordinates: { lat, lng },
+      note: record.geogcomments ?? 'PBDB 収録の産地メモです。',
+    });
+  });
+
+  return [...deduped.values()].slice(0, 8);
+}
+
+function buildLocalityLabel(record: PbdbOccurrenceRecord): string {
+  const formation = record.formation ?? record.geological_group;
+  const country = normalizeCountry(record.cc, record.state);
+  if (formation) {
+    return `${formation} (${country})`;
+  }
+  return country;
+}
+
+function buildPeriodLabel(record?: PbdbTaxonRecord): string {
+  if (!record?.early_interval && !record?.late_interval) {
+    return 'Period data unavailable';
+  }
+  if (record.early_interval && record.late_interval && record.early_interval !== record.late_interval) {
+    return `${record.early_interval} - ${record.late_interval}`;
+  }
+  return record.early_interval ?? record.late_interval ?? 'Period data unavailable';
+}
+
+function buildAgeLabel(record?: PbdbTaxonRecord): string {
+  const start = formatMa(record?.firstapp_max_ma);
+  const end = formatMa(record?.lastapp_min_ma);
+  if (!start && !end) {
+    return 'Age data unavailable';
+  }
+  if (start && end) {
+    return `${start} - ${end}`;
+  }
+  return start ?? end ?? 'Age data unavailable';
+}
+
+function buildSummary(seed: SeedDinosaur, description: string | undefined, occurrenceCount: number | undefined, period: string): string {
+  const base = description ?? `${seed.scientificName} の外部データを統合したレコードです。`;
+  if (!occurrenceCount || occurrenceCount <= 0) {
+    return base;
+  }
+  return `${base} PaleoBioDB では ${occurrenceCount} 件の産出記録が確認でき、${period} の情報に接続できます。`;
+}
+
+function buildSignificance(seed: SeedDinosaur, occurrenceCount: number | undefined, localityCount: number, referenceCount: number): string {
+  const pieces = [
+    occurrenceCount ? `PBDB occurrence ${occurrenceCount} 件` : undefined,
+    localityCount > 0 ? `地図表示用の産地 ${localityCount} 件` : undefined,
+    referenceCount > 0 ? `文献導線 ${referenceCount} 件` : undefined,
+  ].filter(Boolean);
+
+  if (pieces.length === 0) {
+    return `${seed.scientificName} の外部メタデータは一部のみ取得できました。`;
   }
 
-  const payload = (await request.json()) as OptimadeResponse;
-  const record = payload.data?.[0];
-  if (!record) {
-    throw new Error('No matching COD record was found.');
-  }
+  return `${pieces.join(' / ')} をライブ取得しています。`;
+}
 
-  const summary = buildSummaryFromRecord(record, record.attributes?.chemical_formula_reduced ?? codId);
+function buildDatabaseReferences(seed: SeedDinosaur, pbdbTaxon?: PbdbTaxonRecord, wikidataId?: string): ReferenceEntry[] {
+  const pbdbQuery = `https://paleobiodb.org/data1.2/taxa/single.json?name=${encodeURIComponent(seed.pbdbName)}&show=attr,app&vocab=pbdb`;
+  return [
+    {
+      title: `Wikidata item: ${seed.scientificName}`,
+      authors: 'Wikidata contributors',
+      year: new Date().getFullYear(),
+      journal: 'Wikidata',
+      url: wikidataId ? `https://www.wikidata.org/wiki/${wikidataId}` : `https://www.wikidata.org/w/index.php?search=${encodeURIComponent(seed.scientificName)}`,
+      kind: 'database',
+    },
+    {
+      title: `PaleoBioDB taxon record: ${pbdbTaxon?.taxon_name ?? seed.pbdbName}`,
+      authors: 'PaleoBioDB contributors',
+      year: new Date().getFullYear(),
+      journal: 'PaleoBioDB',
+      url: pbdbQuery,
+      kind: 'database',
+    },
+  ];
+}
 
+function buildFallbackDetail(seed: SeedDinosaur): DinosaurDetail {
   return {
-    ...summary,
-    description: `${summary.title} の CIF を COD から直接ロードしています。`,
-    cifUrl: `${codBaseUrl}/${codId}.cif`,
-    cifFormat: 'cif',
-    source: `${codBaseUrl}/${codId}.html`,
+    id: seed.id,
+    nameJa: seed.fallbackNameJa,
+    nameEn: seed.scientificName,
+    meaning: seed.meaning,
+    clade: seed.clade,
+    subgroup: seed.subgroup,
+    diet: seed.diet,
+    period: 'Period data unavailable',
+    ageMa: 'Age data unavailable',
+    lengthMeters: seed.lengthMeters,
+    massEstimateKg: seed.massEstimateKg,
+    region: seed.region,
+    summary: `${seed.scientificName} のライブデータ取得に失敗したため、ローカルのフォールバック情報を表示しています。`,
+    significance: '外部 API が不安定な場合でも一覧と詳細が落ちないようにフォールバックしています。',
+    localities: [fallbackLocality(seed)],
+    references: fallbackReferences(seed),
   };
+}
+
+function fallbackLocality(seed: SeedDinosaur): LocalityDetail {
+  return {
+    label: `${seed.region} locality`,
+    country: seed.region,
+    formation: 'Pending PBDB fetch',
+    age: 'Pending interval',
+    coordinates: { lat: 0, lng: 0 },
+    note: '外部 API が応答しなかったため、地域ベースのフォールバックを表示しています。',
+  };
+}
+
+function fallbackReferences(seed: SeedDinosaur): ReferenceEntry[] {
+  return [
+    {
+      title: `Wikidata item: ${seed.scientificName}`,
+      authors: 'Wikidata contributors',
+      year: new Date().getFullYear(),
+      journal: 'Wikidata',
+      url: `https://www.wikidata.org/w/index.php?search=${encodeURIComponent(seed.scientificName)}`,
+      kind: 'database',
+    },
+  ];
+}
+
+function toReferenceEntry(record: PbdbReferenceRecord, kind: ReferenceEntry['kind']): ReferenceEntry {
+  const year = Number(record.pubyr ?? '') || new Date().getFullYear();
+  const authors = buildAuthors(record);
+  const journalParts = [record.pubtitle, record.pubvol].filter(Boolean);
+  return {
+    title: record.reftitle ?? 'Untitled PBDB reference',
+    authors,
+    year,
+    journal: journalParts.join(' ') || 'PaleoBioDB reference',
+    doi: record.doi,
+    url: `https://paleobiodb.org/data1.2/refs/single.json?id=ref:${record.reference_no ?? ''}&vocab=pbdb`,
+    kind,
+  };
+}
+
+function buildAuthors(record: PbdbReferenceRecord): string {
+  const authors: string[] = [];
+
+  if (record.author1last) {
+    authors.push([record.author1last, record.author1init].filter(Boolean).join(' '));
+  }
+  if (record.author2last) {
+    authors.push([record.author2last, record.author2init].filter(Boolean).join(' '));
+  }
+  if (record.otherauthors) {
+    authors.push(record.otherauthors);
+  }
+
+  return authors.join(', ') || 'Unknown authors';
+}
+
+function normalizeCountry(code?: string, state?: string): string {
+  const countries: Record<string, string> = {
+    US: 'United States',
+    CA: 'Canada',
+    BE: 'Belgium',
+    MA: 'Morocco',
+    EG: 'Egypt',
+    CN: 'China',
+    MN: 'Mongolia',
+    AR: 'Argentina',
+  };
+
+  const country = code ? countries[code] ?? code : 'Unknown country';
+  if (!state) {
+    return country;
+  }
+  return `${country} / ${state}`;
+}
+
+function formatMa(value?: number): string | undefined {
+  if (typeof value !== 'number' || Number.isNaN(value)) {
+    return undefined;
+  }
+  return `${value.toFixed(1)} Ma`;
+}
+
+function matchesFilter(actual: string, expected: string): boolean {
+  return expected.length === 0 || actual === expected;
+}
+
+function uniqueSorted(values: string[]): string[] {
+  return [...new Set(values)].sort((left, right) => left.localeCompare(right));
+}
+
+async function fetchWikidataEntity(searchName: string): Promise<{ wikidataId?: string; nameJa?: string; description?: string }> {
+  const searchUrl = `https://www.wikidata.org/w/api.php?action=wbsearchentities&format=json&language=en&type=item&limit=5&search=${encodeURIComponent(searchName)}&origin=*`;
+  const searchPayload = await fetchJson<WikidataSearchResponse>(searchUrl);
+  const match =
+    searchPayload.search?.find((entry) => entry.label?.toLowerCase() === searchName.toLowerCase()) ??
+    searchPayload.search?.[0];
+
+  if (!match?.id) {
+    return {
+      description: searchPayload.search?.[0]?.description,
+    };
+  }
+
+  const qid = match.id;
+  const url = `https://www.wikidata.org/w/api.php?action=wbgetentities&format=json&ids=${qid}&languages=ja|en&props=labels|descriptions&origin=*`;
+  const payload = await fetchJson<WikidataEntityResponse>(url);
+  const entity = payload.entities?.[qid];
+  return {
+    wikidataId: qid,
+    nameJa: pickLocalizedValue(entity?.labels),
+    description: pickLocalizedValue(entity?.descriptions) ?? match.description,
+  };
+}
+
+async function fetchPbdbTaxon(name: string): Promise<PbdbTaxonRecord | undefined> {
+  const url = `https://paleobiodb.org/data1.2/taxa/single.json?name=${encodeURIComponent(name)}&show=attr,app&vocab=pbdb`;
+  const payload = await fetchJson<PbdbTaxonResponse>(url);
+  return payload.records?.[0];
+}
+
+async function fetchPbdbOccurrences(name: string): Promise<PbdbOccurrenceRecord[]> {
+  const url = `https://paleobiodb.org/data1.2/occs/list.json?base_name=${encodeURIComponent(name)}&show=loc,time,strat,ident,coords&vocab=pbdb&limit=8`;
+  const payload = await fetchJson<PbdbOccurrenceResponse>(url);
+  return payload.records ?? [];
+}
+
+async function fetchPbdbReference(referenceNo: string): Promise<PbdbReferenceRecord | undefined> {
+  const url = `https://paleobiodb.org/data1.2/refs/single.json?id=ref:${encodeURIComponent(referenceNo)}&vocab=pbdb`;
+  const payload = await fetchJson<PbdbReferenceResponse>(url);
+  return payload.records?.[0];
+}
+
+async function fetchJson<T>(url: string): Promise<T> {
+  const response = await fetch(url, {
+    headers: {
+      Accept: 'application/json',
+    },
+    signal: AbortSignal.timeout(15000),
+  });
+
+  if (!response.ok) {
+    throw new Error(`External request failed: ${response.status} ${response.statusText}`);
+  }
+
+  return (await response.json()) as T;
+}
+
+function pickLocalizedValue(record?: Record<string, { value: string }>): string | undefined {
+  return record?.ja?.value ?? record?.en?.value;
 }
 
 app.listen(port, () => {

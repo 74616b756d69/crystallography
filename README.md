@@ -3,11 +3,7 @@
 3Dmol.js ベースの試作を、TypeScript と Mol* ベースの構成へ置き換えるための土台です。
 結晶構造データは無料で公開されている COD を利用し、backend が COD の OPTIMADE API と CIF 配布 URL を扱います。
 
-<<<<<<< Updated upstream
-- ちなみに3Dmolは結晶構造の1ユニットセル（単位格子）だけが描画されるらしいからマジで表記してもつまらん
-- 今GitHubに入っているcifファイルじゃ動かない　04369a.cifファイルは動きます。
---------
-=======
+
 ### 構成
 
 - frontend: Vite + TypeScript + Mol*
@@ -20,7 +16,6 @@
 1. Docker Desktop を起動する
 2. ルートで docker compose up --build を実行する
 3. ブラウザで http://localhost:5173 を開く
->>>>>>> Stashed changes
 
 backend のヘルスチェックは http://localhost:3000/api/health です。
 
