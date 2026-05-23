@@ -104,6 +104,7 @@ const DIET_OPTIONS: DietOption[] = ['すべて', '肉食', '草食', '雑食'];
 const CLASSIFICATION_OPTIONS: ClassificationOption[] = ['すべて', '獣脚類', '竜脚類', '鳥盤類', '剣竜類', '角竜類', '鎧竜類', '鴨嘴竜類'];
 const CARD_ROTATIONS = ['-0.4deg', '0.55deg', '-0.65deg', '0.35deg', '-0.3deg', '0.7deg'];
 const TAG_ROTATIONS = ['-0.8deg', '0.7deg', '-0.5deg', '0.6deg'];
+const DETAIL_QUERY_KEY = 'record';
 
 const app = document.querySelector<HTMLDivElement>('#app');
 
@@ -125,60 +126,63 @@ app.innerHTML = `
 
       <div class="wave-divider" aria-hidden="true">${renderWave(false)}</div>
 
-      <section class="search-panel" aria-label="絞り込み検索">
-        <h2>— 絞り込み検索 —</h2>
-        <form id="filter-form" class="search-form" autocomplete="off">
-          <div class="search-row">
-            <label class="search-block search-keyword">
-              <span>キーワード</span>
-              <div class="search-inline">
-                <input id="keyword-input" name="keyword" type="text" placeholder="恐竜の名前を入力…" autocomplete="off" />
-                <button type="submit">検　索</button>
-              </div>
-            </label>
+      <section id="catalog-view" class="catalog-view">
+        <section class="search-panel" aria-label="絞り込み検索">
+          <h2>— 絞り込み検索 —</h2>
+          <form id="filter-form" class="search-form" autocomplete="off">
+            <div class="search-row">
+              <label class="search-block search-keyword">
+                <span>キーワード</span>
+                <div class="search-inline">
+                  <input id="keyword-input" name="keyword" type="text" placeholder="恐竜の名前を入力…" autocomplete="off" />
+                  <button type="submit">検　索</button>
+                </div>
+              </label>
+            </div>
+
+            <div class="filter-grid">
+              <label class="search-block">
+                <span>時代</span>
+                <select id="era-select" name="era"></select>
+              </label>
+
+              <label class="search-block">
+                <span>産地・大陸</span>
+                <select id="continent-select" name="continent"></select>
+              </label>
+
+              <label class="search-block">
+                <span>食性</span>
+                <select id="diet-select" name="diet"></select>
+              </label>
+
+              <label class="search-block">
+                <span>分類</span>
+                <select id="classification-select" name="classification"></select>
+              </label>
+
+              <label class="search-block search-range">
+                <span>大きさ（体長）</span>
+                <input id="length-range" name="maxLength" type="range" min="0" max="40" step="1" value="40" />
+                <strong id="range-value">0m 〜 40m</strong>
+              </label>
+            </div>
+          </form>
+        </section>
+
+        <div class="wave-divider wave-divider-dashed" aria-hidden="true">${renderWave(true)}</div>
+
+        <section class="catalog-section" aria-label="恐竜カード一覧">
+          <div class="catalog-headline">
+            <h2 id="catalog-title">— 図鑑　全0種 —</h2>
+            <p id="result-count">検索結果 0件</p>
           </div>
-
-          <div class="filter-grid">
-            <label class="search-block">
-              <span>時代</span>
-              <select id="era-select" name="era"></select>
-            </label>
-
-            <label class="search-block">
-              <span>産地・大陸</span>
-              <select id="continent-select" name="continent"></select>
-            </label>
-
-            <label class="search-block">
-              <span>食性</span>
-              <select id="diet-select" name="diet"></select>
-            </label>
-
-            <label class="search-block">
-              <span>分類</span>
-              <select id="classification-select" name="classification"></select>
-            </label>
-
-            <label class="search-block search-range">
-              <span>大きさ（体長）</span>
-              <input id="length-range" name="maxLength" type="range" min="0" max="40" step="1" value="40" />
-              <strong id="range-value">0m 〜 40m</strong>
-            </label>
-          </div>
-        </form>
+          <p id="result-status" class="result-status">調査記録を読み込み中です。</p>
+          <div id="catalog-grid" class="catalog-grid"></div>
+        </section>
       </section>
 
-      <div class="wave-divider wave-divider-dashed" aria-hidden="true">${renderWave(true)}</div>
-
-      <section class="catalog-section" aria-label="恐竜カード一覧">
-        <div class="catalog-headline">
-          <h2 id="catalog-title">— 図鑑　全0種 —</h2>
-          <p id="result-count">検索結果 0件</p>
-        </div>
-        <p id="result-status" class="result-status">調査記録を読み込み中です。</p>
-        <section id="detail-panel" class="detail-panel" aria-live="polite"></section>
-        <div id="catalog-grid" class="catalog-grid"></div>
-      </section>
+      <section id="detail-view" class="detail-view is-hidden" aria-live="polite"></section>
 
       <footer class="notes-footer">
         <p>記録者：___________　調査日：___________</p>
@@ -190,6 +194,8 @@ app.innerHTML = `
 `;
 
 const ui = {
+  catalogView: document.querySelector<HTMLElement>('#catalog-view'),
+  detailView: document.querySelector<HTMLElement>('#detail-view'),
   form: document.querySelector<HTMLFormElement>('#filter-form'),
   keywordInput: document.querySelector<HTMLInputElement>('#keyword-input'),
   eraSelect: document.querySelector<HTMLSelectElement>('#era-select'),
@@ -201,11 +207,12 @@ const ui = {
   catalogTitle: document.querySelector<HTMLElement>('#catalog-title'),
   resultCount: document.querySelector<HTMLElement>('#result-count'),
   resultStatus: document.querySelector<HTMLElement>('#result-status'),
-  detailPanel: document.querySelector<HTMLElement>('#detail-panel'),
   catalogGrid: document.querySelector<HTMLElement>('#catalog-grid'),
 };
 
 if (
+  !ui.catalogView ||
+  !ui.detailView ||
   !ui.form ||
   !ui.keywordInput ||
   !ui.eraSelect ||
@@ -217,13 +224,14 @@ if (
   !ui.catalogTitle ||
   !ui.resultCount ||
   !ui.resultStatus ||
-  !ui.detailPanel ||
   !ui.catalogGrid
 ) {
   throw new Error('Required UI elements are missing.');
 }
 
 const uiElements = {
+  catalogView: ui.catalogView,
+  detailView: ui.detailView,
   form: ui.form,
   keywordInput: ui.keywordInput,
   eraSelect: ui.eraSelect,
@@ -235,7 +243,6 @@ const uiElements = {
   catalogTitle: ui.catalogTitle,
   resultCount: ui.resultCount,
   resultStatus: ui.resultStatus,
-  detailPanel: ui.detailPanel,
   catalogGrid: ui.catalogGrid,
 };
 
@@ -431,6 +438,31 @@ function readFilters(): Filters {
 
 function updateRangeLabel(): void {
   uiElements.rangeValue.textContent = `0m 〜 ${uiElements.lengthRange.value}m`;
+}
+
+function getSelectedRecordIdFromUrl(): string | null {
+  const url = new URL(window.location.href);
+  const recordId = url.searchParams.get(DETAIL_QUERY_KEY);
+  return recordId && recordId.trim() ? recordId : null;
+}
+
+function updateUrl(recordId: string | null, historyMode: 'push' | 'replace' = 'push'): void {
+  const url = new URL(window.location.href);
+
+  if (recordId) {
+    url.searchParams.set(DETAIL_QUERY_KEY, recordId);
+  } else {
+    url.searchParams.delete(DETAIL_QUERY_KEY);
+  }
+
+  const nextUrl = `${url.pathname}${url.search}${url.hash}`;
+
+  if (historyMode === 'replace') {
+    window.history.replaceState({ recordId }, '', nextUrl);
+    return;
+  }
+
+  window.history.pushState({ recordId }, '', nextUrl);
 }
 
 function matchesKeyword(record: NotebookRecord, keyword: string): boolean {
@@ -643,20 +675,21 @@ function renderDetailPanel(): void {
   const record = state.records.find((entry) => entry.id === state.selectedRecordId);
 
   if (!record) {
-    uiElements.detailPanel.innerHTML = `
+    uiElements.detailView.innerHTML = `
       <div class="detail-panel-empty">
         <p class="detail-kicker">調査メモの詳細</p>
-        <p class="detail-empty">一覧カードの付箋から詳細を開くと、外部データ要約と文献導線をここに表示します。</p>
+        <p class="detail-empty">指定された調査メモが見つかりませんでした。一覧へ戻って別の記録を開いてください。</p>
+        <button type="button" class="detail-close" data-detail-close="true">一覧へ戻る</button>
       </div>
     `;
     return;
   }
 
-  uiElements.detailPanel.innerHTML = `
+  uiElements.detailView.innerHTML = `
     <article class="detail-sheet">
       <div class="detail-sheet-head">
         <div>
-          <p class="detail-kicker">調査メモの詳細</p>
+          <p class="detail-kicker">調査メモの詳細ページ</p>
           <h3>${escapeHtml(record.nameJa)}</h3>
           <p class="detail-scientific">${escapeHtml(record.nameEn)}</p>
         </div>
@@ -701,7 +734,16 @@ function renderDetailPanel(): void {
 function renderCatalog(): void {
   uiElements.catalogTitle.textContent = `— 図鑑　全${state.records.length}種 —`;
   uiElements.resultCount.textContent = `検索結果 ${state.filteredRecords.length}件`;
-  renderDetailPanel();
+
+  if (state.selectedRecordId) {
+    uiElements.catalogView.classList.add('is-hidden');
+    uiElements.detailView.classList.remove('is-hidden');
+    renderDetailPanel();
+    return;
+  }
+
+  uiElements.catalogView.classList.remove('is-hidden');
+  uiElements.detailView.classList.add('is-hidden');
 
   if (state.filteredRecords.length === 0) {
     uiElements.catalogGrid.innerHTML = '<p class="empty-state">該当する調査記録は見つかりませんでした。</p>';
@@ -709,6 +751,31 @@ function renderCatalog(): void {
   }
 
   uiElements.catalogGrid.innerHTML = state.filteredRecords.map(renderCard).join('');
+}
+
+function openDetail(recordId: string): void {
+  state.selectedRecordId = recordId;
+  updateUrl(recordId);
+  renderCatalog();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function closeDetail(historyMode: 'push' | 'replace' = 'push'): void {
+  state.selectedRecordId = null;
+  updateUrl(null, historyMode);
+  renderCatalog();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function syncRouteFromUrl(): void {
+  const recordId = getSelectedRecordIdFromUrl();
+  state.selectedRecordId = recordId && state.records.some((record) => record.id === recordId) ? recordId : null;
+
+  if (recordId && !state.selectedRecordId) {
+    updateUrl(null, 'replace');
+  }
+
+  renderCatalog();
 }
 
 function renderControls(): void {
@@ -733,12 +800,11 @@ async function bootstrap(): Promise<void> {
     const details = await Promise.all(summaries.map((summary) => fetchDetail(summary.id)));
     state.records = details.map(toNotebookRecord);
     state.filteredRecords = [...state.records];
-    state.selectedRecordId = null;
     uiElements.form.reset();
     uiElements.resultStatus.textContent = '野外調査ノートを整理しました。';
     renderControls();
     applyFilters();
-    renderCatalog();
+    syncRouteFromUrl();
   } catch (error) {
     uiElements.resultStatus.textContent = error instanceof Error ? error.message : '調査記録の読み込みに失敗しました。';
     uiElements.catalogGrid.innerHTML = '<p class="empty-state">バックエンド API を起動すると図鑑カードを表示できます。</p>';
@@ -777,9 +843,12 @@ uiElements.catalogGrid.addEventListener('click', (event) => {
     return;
   }
 
-  state.selectedRecordId = trigger.dataset.recordId ?? null;
-  renderCatalog();
-  uiElements.detailPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const recordId = trigger.dataset.recordId;
+  if (!recordId) {
+    return;
+  }
+
+  openDetail(recordId);
 });
 
 uiElements.catalogGrid.addEventListener('keydown', (event) => {
@@ -798,12 +867,15 @@ uiElements.catalogGrid.addEventListener('keydown', (event) => {
   }
 
   event.preventDefault();
-  state.selectedRecordId = trigger.dataset.recordId ?? null;
-  renderCatalog();
-  uiElements.detailPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const recordId = trigger.dataset.recordId;
+  if (!recordId) {
+    return;
+  }
+
+  openDetail(recordId);
 });
 
-uiElements.detailPanel.addEventListener('click', (event) => {
+uiElements.detailView.addEventListener('click', (event) => {
   const target = event.target;
   if (!(target instanceof HTMLElement)) {
     return;
@@ -813,8 +885,11 @@ uiElements.detailPanel.addEventListener('click', (event) => {
     return;
   }
 
-  state.selectedRecordId = null;
-  renderCatalog();
+  closeDetail();
+});
+
+window.addEventListener('popstate', () => {
+  syncRouteFromUrl();
 });
 
 void bootstrap();

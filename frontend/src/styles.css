@@ -234,8 +234,17 @@ ul {
   padding-bottom: 26px;
 }
 
-.detail-panel {
-  margin-top: 18px;
+.catalog-view,
+.detail-view {
+  margin-top: 0;
+}
+
+.detail-view {
+  padding-bottom: 26px;
+}
+
+.is-hidden {
+  display: none;
 }
 
 .detail-panel-empty,
@@ -244,6 +253,11 @@ ul {
   background: rgba(250, 243, 224, 0.74);
   box-shadow: 3px 3px 0 rgba(74, 48, 24, 0.1);
   padding: 18px 16px;
+}
+
+.detail-panel-empty,
+.detail-sheet {
+  margin-top: 18px;
 }
 
 .detail-sheet-head,

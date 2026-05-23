@@ -1,6 +1,8 @@
 import cors from 'cors';
 import express, { type Request, type Response } from 'express';
 
+import { additionalSeedDinosaurs } from './additionalSeedDinosaurs.js';
+
 type GeoPoint = {
   lat: number;
   lng: number;
@@ -1457,6 +1459,7 @@ const seedDinosaurs: SeedDinosaur[] = [
     lengthMeters: 8,
     massEstimateKg: 3000,
   },
+  ...additionalSeedDinosaurs,
 ];
 
 app.use(cors());
