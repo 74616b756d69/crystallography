@@ -407,6 +407,39 @@ ul {
 .map-marker-group line {
   stroke: var(--line);
   stroke-width: 0.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.map-outline-echo path {
+  opacity: 0.38;
+  stroke-width: 0.52;
+}
+
+.map-grain path {
+  stroke: rgba(138, 96, 48, 0.24);
+  stroke-width: 0.45;
+  stroke-linecap: round;
+  stroke-dasharray: 1.2 2.1;
+}
+
+.map-route path {
+  stroke: rgba(122, 56, 32, 0.68);
+  stroke-width: 0.6;
+  stroke-dasharray: 2 2;
+}
+
+.map-notes text {
+  fill: var(--heading);
+  font-family: 'IM Fell English', serif;
+  font-size: 3.6px;
+  font-style: italic;
+  letter-spacing: 0.02em;
+}
+
+.map-marker-group line {
+  stroke: var(--emphasis);
+  stroke-width: 0.85;
 }
 
 .tag-list {

@@ -476,8 +476,10 @@ function formatMass(mass: number): string {
 }
 
 function buildMapMarker(locality: LocalityDetail): string {
-  const x = ((locality.coordinates.lng + 180) / 360) * 100;
-  const y = ((90 - locality.coordinates.lat) / 180) * 100;
+  const viewBoxWidth = 100;
+  const viewBoxHeight = 52;
+  const x = ((locality.coordinates.lng + 180) / 360) * viewBoxWidth;
+  const y = ((90 - locality.coordinates.lat) / 180) * viewBoxHeight;
   return `<g transform="translate(${x.toFixed(2)} ${y.toFixed(2)})"><line x1="-1.8" y1="-1.8" x2="1.8" y2="1.8"/><line x1="1.8" y1="-1.8" x2="-1.8" y2="1.8"/></g>`;
 }
 
@@ -485,15 +487,42 @@ function renderMapSvg(localities: LocalityDetail[]): string {
   const markers = localities.slice(0, 6).map(buildMapMarker).join('');
   return `
     <svg viewBox="0 0 100 52" aria-label="産地マップ枠">
+      <g class="map-grain" fill="none">
+        <path d="M5 9 C12 8 18 8 25 9" />
+        <path d="M63 8 C71 7 80 8 88 10" />
+        <path d="M8 27 C14 26 18 26 23 27" />
+        <path d="M40 40 C48 39 57 39 66 40" />
+        <path d="M72 30 C78 29 84 30 90 32" />
+      </g>
+      <g class="map-outline map-outline-echo" fill="none">
+        <path d="M6.8 15.6 C8.6 12.8 12.5 10.8 16.5 10.7 L20.2 11.6 L22.8 13.2 L24 16 L22.1 18.3 L19.2 19.2 L17.2 22.2 L13.2 23.1 L10.3 22.2 L8.1 20.3 L7.1 17.4 Z" />
+        <path d="M17.6 11.4 C20.2 8.5 24.5 6.6 29.1 6.4 L34.1 7.3 L37.7 9.1 L39.7 12.1 L38.8 15.1 L35.9 16.3 L33.1 18.1 L30.1 18.4 L28.1 21.1 L24.3 20.2 L21.4 18.3 L19.1 15.2 Z" />
+        <path d="M28.4 21.8 L30.1 23.7 L31 27.2 L30.9 31.2 L30 36.2 L28.2 42.1 L26.2 44.7 L24.5 42.2 L23.4 36.4 L23.4 30.3 L24.4 25.5 L26.2 22.4 Z" />
+        <path d="M44.4 10.5 L47.1 9.4 L50 10.3 L50.9 12 L48.9 13.1 L46.2 13.2 L44.3 12.1 Z" />
+        <path d="M48.4 12.7 C52.4 10.4 58.3 8.5 64.2 8.6 L71.1 9.4 L76.9 11.4 L82 14.4 L85.8 18.2 L84.8 20.3 L81.1 21.2 L78.3 19.4 L74.3 19.4 L71 20.4 L68.9 22.3 L66.1 22.3 L63.2 21.1 L60.2 19.3 L57.1 18.2 L54 18.2 L51 16.2 Z" />
+        <path d="M58.2 21.4 L61 22.3 L64 25.2 L65.7 29.2 L65.8 33.2 L64 37.1 L61.9 38.8 L60.1 36.2 L58.1 31.1 L57.2 26.4 Z" />
+        <path d="M79.4 33.4 L82.1 33.4 L85.1 35.2 L86.7 38.1 L85.8 40.1 L83.2 40.9 L80.1 39.9 L78.2 37.3 Z" />
+      </g>
       <g class="map-outline" fill="none">
-        <path d="M6 16 C8 14 11 12 15 12 C18 12 21 13 23 15 L24 18 L22 20 L19 21 L17 24 L13 24 L10 22 L8 19 L6 18 Z" />
-        <path d="M19 14 C21 11 25 9 29 8 C33 8 37 9 40 11 L41 14 L39 17 L35 18 L34 21 L30 23 L27 22 L24 19 L21 18 Z" />
-        <path d="M27 24 C29 25 31 27 32 30 C33 34 33 38 31 42 L29 45 L27 42 L26 38 L25 33 L25 28 Z" />
-        <path d="M46 13 C48 12 50 11 53 11 C55 11 57 12 58 14 L57 16 L54 16 L52 15 L49 16 L47 15 Z" />
-        <path d="M52 14 C56 11 61 9 67 9 C73 9 79 11 84 15 L87 18 L86 21 L82 22 L79 20 L75 20 L72 22 L68 22 L66 24 L62 23 L60 20 L56 19 L54 17 Z" />
-        <path d="M61 24 C63 23 66 24 68 26 C70 29 71 32 70 35 L68 37 L66 35 L65 31 L63 28 Z" />
-        <path d="M81 34 C83 34 85 35 86 37 L86 40 L84 41 L81 40 L79 38 L79 36 Z" />
-        <path d="M35 46 C41 45 48 45 55 46 C61 47 67 47 73 46" />
+        <path d="M6 15 C8 12 12 10 16 10 L20 11 L23 13 L24 16 L22 18 L19 19 L17 22 L13 23 L10 22 L8 20 L7 17 Z" />
+        <path d="M17 11 C20 8 24 6 29 6 L34 7 L38 9 L40 12 L39 15 L36 16 L33 18 L30 18 L28 21 L24 20 L21 18 L19 15 Z" />
+        <path d="M28 21 L30 23 L31 27 L31 31 L30 36 L28 42 L26 45 L24 42 L23 36 L23 30 L24 25 L26 22 Z" />
+        <path d="M44 10 L47 9 L50 10 L51 12 L49 13 L46 13 L44 12 Z" />
+        <path d="M48 12 C52 10 58 8 64 8 L71 9 L77 11 L82 14 L86 18 L85 20 L81 21 L78 19 L74 19 L71 20 L69 22 L66 22 L63 21 L60 19 L57 18 L54 18 L51 16 Z" />
+        <path d="M58 21 L61 22 L64 25 L66 29 L66 33 L64 37 L62 39 L60 36 L58 31 L57 26 Z" />
+        <path d="M79 33 L82 33 L85 35 L87 38 L86 40 L83 41 L80 40 L78 37 Z" />
+      </g>
+      <g class="map-route" fill="none">
+        <path d="M21 15 C31 13 43 14 53 17 C64 20 71 24 80 36" />
+      </g>
+      <g class="map-notes">
+        <text x="8" y="8">N. America</text>
+        <text x="24" y="45">S. America</text>
+        <text x="46" y="7">Europe</text>
+        <text x="61" y="7">Asia</text>
+        <text x="58" y="41">Africa</text>
+        <text x="77" y="31">Australia</text>
+        <text x="60" y="15">survey route</text>
       </g>
       <g class="map-marker-group">${markers}</g>
     </svg>
