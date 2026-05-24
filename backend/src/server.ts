@@ -19,6 +19,14 @@ type ReferenceEntry = {
   kind: 'original-description' | 'redescription' | 'review' | 'database';
 };
 
+type ImageAsset = {
+  imageUrl: string;
+  pageUrl: string;
+  title: string;
+  source: 'wikipedia-ja';
+  attribution: string;
+};
+
 type LocalitySummary = {
   label: string;
   country: string;
@@ -47,6 +55,7 @@ type DinosaurSummary = {
 type DinosaurDetail = Omit<DinosaurSummary, 'localities'> & {
   meaning: string;
   detailedDescription: string;
+  heroImage?: ImageAsset;
   ageMa: string;
   lengthMeters: number;
   massEstimateKg: number;
@@ -153,6 +162,7 @@ type ExternalSnapshot = {
   description?: string;
   wikipediaSummaryJa?: string;
   wikipediaArticleUrl?: string;
+  heroImage?: ImageAsset;
   pbdbTaxon?: PbdbTaxonRecord;
   localities: LocalityDetail[];
   references: ReferenceEntry[];
@@ -160,11 +170,24 @@ type ExternalSnapshot = {
 
 type WikipediaSummaryResponse = {
   extract?: string;
+  title?: string;
+  thumbnail?: {
+    source?: string;
+  };
+  originalimage?: {
+    source?: string;
+  };
   content_urls?: {
     desktop?: {
       page?: string;
     };
   };
+};
+
+type WikipediaSummaryResult = {
+  extract?: string;
+  articleUrl?: string;
+  heroImage?: ImageAsset;
 };
 
 type CrossrefWorkResponse = {
@@ -1609,7 +1632,13 @@ async function buildDinosaurDetail(seed: SeedDinosaur): Promise<DinosaurDetail> 
   const ageMa = buildAgeLabel(pbdbTaxon);
   const occurrenceCount = pbdbTaxon?.n_occs ?? snapshot.localities.length;
   const summary = buildSummary(seed, snapshot.description, occurrenceCount, period);
-  const detailedDescription = buildDetailedDescription(seed, snapshot.wikipediaSummaryJa, summary);
+  const detailedDescription = buildDetailedDescription(
+    seed,
+    snapshot.wikipediaSummaryJa,
+    period,
+    snapshot.localities.length,
+    snapshot.references.length,
+  );
   const significance = buildSignificance(seed, occurrenceCount, snapshot.localities.length, snapshot.references.length);
 
   return {
@@ -1618,6 +1647,7 @@ async function buildDinosaurDetail(seed: SeedDinosaur): Promise<DinosaurDetail> 
     nameEn: seed.scientificName,
     meaning: seed.meaning,
     detailedDescription,
+    heroImage: snapshot.heroImage,
     clade: seed.clade,
     subgroup: seed.subgroup,
     diet: seed.diet,
@@ -1671,6 +1701,7 @@ async function loadExternalSnapshot(seed: SeedDinosaur): Promise<ExternalSnapsho
     description: wikidata?.description,
     wikipediaSummaryJa: wikipediaSummary?.extract,
     wikipediaArticleUrl: wikipediaSummary?.articleUrl,
+    heroImage: wikipediaSummary?.heroImage,
     pbdbTaxon,
     localities,
     references: dedupeReferenceEntries([...literature, ...databaseReferences]),
@@ -1766,14 +1797,43 @@ function buildSummary(seed: SeedDinosaur, description: string | undefined, occur
   return `${base} PaleoBioDB では ${occurrenceCount} 件の産出記録が確認でき、${period} の情報に接続できます。`;
 }
 
-function buildDetailedDescription(seed: SeedDinosaur, wikipediaSummaryJa: string | undefined, summary: string): string {
+function buildDetailedDescription(
+  seed: SeedDinosaur,
+  wikipediaSummaryJa: string | undefined,
+  period: string,
+  localityCount: number,
+  referenceCount: number,
+): string {
   const normalized = wikipediaSummaryJa?.replace(/\s+/g, ' ').trim();
+  const supplement = buildDescriptionSupplement(seed, period, localityCount, referenceCount);
+
   if (normalized) {
-    return normalized;
+    return `${normalized} ${supplement}`;
   }
-  return `${seed.fallbackNameJa}は、${seed.meaning}として知られる恐竜です。${summary}`;
+
+  return `${seed.fallbackNameJa}は、${seed.meaning}として知られる恐竜です。${supplement}`;
 }
 
+function buildDescriptionSupplement(seed: SeedDinosaur, period: string, localityCount: number, referenceCount: number): string {
+  const diet = formatDietLabel(seed.diet);
+  const majorClade = formatMajorCladeLabel(seed.clade);
+  const clade = formatSubgroupLabel(seed.subgroup, seed.clade);
+  const region = formatRegionLabel(seed.region);
+  const periodText = period === 'Period data unavailable' ? '時代の詳細は調査中です。' : `${period} ごろに知られています。`;
+  const localityText = localityCount > 0
+    ? `現在は ${localityCount} 件の産地情報と ${referenceCount} 件の参考文献・データベース導線を合わせて確認できます。`
+    : `参考文献・データベース導線は ${referenceCount} 件まとまっています。`;
+
+  return `${seed.fallbackNameJa}は、${majorClade}に属する${diet}の${clade}として扱われています。学名の意味は「${seed.meaning}」で、主な産地は${region}です。${periodText} 体長は約${seed.lengthMeters.toFixed(1)}m、推定体重は約${Math.round(seed.massEstimateKg).toLocaleString()}kgです。${localityText}`;
+}
+
+function formatMajorCladeLabel(clade: DinosaurSummary['clade']): string {
+  if (clade === 'Saurischia') {
+    return '竜盤類';
+  }
+
+  return '鳥盤類';
+}
 function buildSignificance(seed: SeedDinosaur, occurrenceCount: number | undefined, localityCount: number, referenceCount: number): string {
   const pieces = [
     occurrenceCount ? `PBDB occurrence ${occurrenceCount} 件` : undefined,
@@ -1891,7 +1951,7 @@ function buildFallbackDetail(seed: SeedDinosaur): DinosaurDetail {
     nameJa: seed.fallbackNameJa,
     nameEn: seed.scientificName,
     meaning: seed.meaning,
-    detailedDescription: `${seed.fallbackNameJa}は、${seed.meaning}として知られる恐竜です。${seed.scientificName} のライブデータ取得に失敗したため、ローカルのフォールバック情報を表示しています。`,
+    detailedDescription: `${seed.fallbackNameJa}は、${seed.meaning}として知られる恐竜です。${buildDescriptionSupplement(seed, 'Period data unavailable', 1, fallbackReferences(seed).length)} ${seed.scientificName} のライブデータ取得に失敗したため、ローカルのフォールバック情報を表示しています。`,
     clade: seed.clade,
     subgroup: seed.subgroup,
     diet: seed.diet,
@@ -2047,12 +2107,23 @@ async function fetchWikidataEntity(
   };
 }
 
-async function fetchWikipediaSummary(title: string): Promise<{ extract?: string; articleUrl?: string }> {
+async function fetchWikipediaSummary(title: string): Promise<WikipediaSummaryResult> {
   const url = `https://ja.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
   const payload = await fetchJson<WikipediaSummaryResponse>(url);
+  const imageUrl = payload.originalimage?.source ?? payload.thumbnail?.source;
+
   return {
     extract: payload.extract,
     articleUrl: payload.content_urls?.desktop?.page,
+    heroImage: imageUrl && payload.content_urls?.desktop?.page
+      ? {
+          imageUrl,
+          pageUrl: payload.content_urls.desktop.page,
+          title: payload.title ?? title,
+          source: 'wikipedia-ja',
+          attribution: 'Japanese Wikipedia',
+        }
+      : undefined,
   };
 }
 
@@ -2060,7 +2131,7 @@ async function fetchJapaneseWikipediaSummary(
   seed: SeedDinosaur,
   localizedName?: string,
   jaWikipediaTitle?: string,
-): Promise<{ extract?: string; articleUrl?: string } | undefined> {
+): Promise<WikipediaSummaryResult | undefined> {
   const candidates = [seed.fallbackNameJa, localizedName, jaWikipediaTitle, seed.scientificName]
     .filter((value): value is string => Boolean(value?.trim()))
     .filter((value, index, values) => values.indexOf(value) === index);
@@ -2128,6 +2199,75 @@ function formatCrossrefAuthors(authors?: CrossrefAuthor[]): string | undefined {
   }
 
   return names.join(', ');
+}
+
+function formatDietLabel(diet: SeedDinosaur['diet']): string {
+  if (diet === 'Carnivore') {
+    return '肉食';
+  }
+  if (diet === 'Herbivore') {
+    return '草食';
+  }
+  return '雑食';
+}
+
+function formatSubgroupLabel(subgroup: string, clade: SeedDinosaur['clade']): string {
+  const value = subgroup.toLowerCase();
+
+  if (value.includes('theropoda')) {
+    return '獣脚類';
+  }
+  if (value.includes('sauropodomorpha')) {
+    return '竜脚形類';
+  }
+  if (value.includes('ceratopsia')) {
+    return '角竜類';
+  }
+  if (value.includes('hadrosauridae')) {
+    return 'ハドロサウルス科';
+  }
+  if (value.includes('ankylosauria')) {
+    return '鎧竜類';
+  }
+  if (value.includes('stegosauria')) {
+    return '剣竜類';
+  }
+  if (value.includes('ornithopoda')) {
+    return '鳥脚類';
+  }
+  if (value.includes('pachycephalosauria')) {
+    return '堅頭竜類';
+  }
+
+  return clade === 'Saurischia' ? '竜盤類' : '鳥盤類';
+}
+
+function formatRegionLabel(region: string): string {
+  const value = region.toLowerCase();
+
+  if (value.includes('north america')) {
+    return '北アメリカ';
+  }
+  if (value.includes('south america')) {
+    return '南アメリカ';
+  }
+  if (value.includes('europe')) {
+    return 'ヨーロッパ';
+  }
+  if (value.includes('asia')) {
+    return 'アジア';
+  }
+  if (value.includes('africa')) {
+    return 'アフリカ';
+  }
+  if (value.includes('oceania') || value.includes('australia')) {
+    return 'オーストラリア';
+  }
+  if (value.includes('antarctica')) {
+    return '南極';
+  }
+
+  return region;
 }
 
 function readCrossrefYear(message?: CrossrefMessage): number | undefined {

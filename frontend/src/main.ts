@@ -24,6 +24,14 @@ type ReferenceEntry = {
   kind: 'original-description' | 'redescription' | 'review' | 'database';
 };
 
+type ImageAsset = {
+  imageUrl: string;
+  pageUrl: string;
+  title: string;
+  source: 'wikipedia-ja';
+  attribution: string;
+};
+
 type DinosaurSummary = {
   id: string;
   nameJa: string;
@@ -44,6 +52,7 @@ type LocalityDetail = LocalitySummary & {
 type DinosaurDetail = Omit<DinosaurSummary, 'localities'> & {
   meaning: string;
   detailedDescription: string;
+  heroImage?: ImageAsset;
   ageMa: string;
   lengthMeters: number;
   massEstimateKg: number;
@@ -97,7 +106,6 @@ type Filters = {
   continent: ContinentOption;
   diet: DietOption;
   classification: ClassificationOption;
-  minLength: number;
   maxLength: number;
 };
 
@@ -166,12 +174,6 @@ app.innerHTML = `
 
               <label class="search-block search-range">
                 <span>大きさ（体長）</span>
-                <div class="range-inputs">
-                  <label>
-                    <small>以上</small>
-                    <input id="min-length-input" name="minLength" type="number" min="0" max="40" step="0.5" value="0" />
-                  </label>
-                </div>
                 <input id="length-range" name="maxLength" type="range" min="0" max="40" step="1" value="40" />
                 <strong id="range-value">0m 〜 40m</strong>
               </label>
@@ -211,7 +213,6 @@ const ui = {
   continentSelect: document.querySelector<HTMLSelectElement>('#continent-select'),
   dietSelect: document.querySelector<HTMLSelectElement>('#diet-select'),
   classificationSelect: document.querySelector<HTMLSelectElement>('#classification-select'),
-  minLengthInput: document.querySelector<HTMLInputElement>('#min-length-input'),
   lengthRange: document.querySelector<HTMLInputElement>('#length-range'),
   rangeValue: document.querySelector<HTMLElement>('#range-value'),
   catalogTitle: document.querySelector<HTMLElement>('#catalog-title'),
@@ -229,7 +230,6 @@ if (
   !ui.continentSelect ||
   !ui.dietSelect ||
   !ui.classificationSelect ||
-  !ui.minLengthInput ||
   !ui.lengthRange ||
   !ui.rangeValue ||
   !ui.catalogTitle ||
@@ -249,7 +249,6 @@ const uiElements = {
   continentSelect: ui.continentSelect,
   dietSelect: ui.dietSelect,
   classificationSelect: ui.classificationSelect,
-  minLengthInput: ui.minLengthInput,
   lengthRange: ui.lengthRange,
   rangeValue: ui.rangeValue,
   catalogTitle: ui.catalogTitle,
@@ -273,7 +272,6 @@ const state: {
     continent: 'すべて',
     diet: 'すべて',
     classification: 'すべて',
-    minLength: 0,
     maxLength: 40,
   },
 };
@@ -439,27 +437,18 @@ function toNotebookRecord(record: DinosaurDetail): NotebookRecord {
 }
 
 function readFilters(): Filters {
-  const rawMinLength = Number(uiElements.minLengthInput.value);
-  const rawMaxLength = Number(uiElements.lengthRange.value);
-  const minLength = Number.isFinite(rawMinLength) ? Math.max(0, Math.min(40, rawMinLength)) : 0;
-  const maxLength = Number.isFinite(rawMaxLength) ? Math.max(0, Math.min(40, rawMaxLength)) : 40;
-
   return {
     keyword: uiElements.keywordInput.value.trim(),
     era: uiElements.eraSelect.value as EraOption,
     continent: uiElements.continentSelect.value as ContinentOption,
     diet: uiElements.dietSelect.value as DietOption,
     classification: uiElements.classificationSelect.value as ClassificationOption,
-    minLength: Math.min(minLength, maxLength),
-    maxLength: Math.max(minLength, maxLength),
+    maxLength: Number(uiElements.lengthRange.value),
   };
 }
 
 function updateRangeLabel(): void {
-  const filters = readFilters();
-  uiElements.minLengthInput.value = String(filters.minLength);
-  uiElements.lengthRange.value = String(filters.maxLength);
-  uiElements.rangeValue.textContent = `${filters.minLength}m 〜 ${filters.maxLength}m`;
+  uiElements.rangeValue.textContent = `0m 〜 ${uiElements.lengthRange.value}m`;
 }
 
 function getSelectedRecordIdFromUrl(): string | null {
@@ -527,7 +516,7 @@ function applyFilters(): void {
     if (state.filters.classification !== 'すべて' && record.classificationLabel !== state.filters.classification) {
       return false;
     }
-    return record.lengthMeters >= state.filters.minLength && record.lengthMeters <= state.filters.maxLength;
+    return record.lengthMeters <= state.filters.maxLength;
   });
 }
 
@@ -722,6 +711,24 @@ function renderDetailMap(record: NotebookRecord): string {
   `;
 }
 
+function renderDetailHeroImage(record: NotebookRecord): string {
+  if (!record.heroImage) {
+    return '<p class="detail-empty">表示できる写真はまだ取得できていません。</p>';
+  }
+
+  return `
+    <figure class="detail-hero-media">
+      <img src="${escapeHtml(record.heroImage.imageUrl)}" alt="${escapeHtml(`${record.nameJa} の関連画像`)}" loading="eager" />
+      <figcaption>
+        <a href="${escapeHtml(record.heroImage.pageUrl)}" target="_blank" rel="noreferrer">
+          ${escapeHtml(record.heroImage.title)}
+        </a>
+        <span>${escapeHtml(record.heroImage.attribution)}</span>
+      </figcaption>
+    </figure>
+  `;
+}
+
 function renderDetailPanel(): void {
   const record = state.records.find((entry) => entry.id === state.selectedRecordId);
 
@@ -748,6 +755,7 @@ function renderDetailPanel(): void {
       </div>
 
       <div class="detail-summary-block">
+        ${renderDetailHeroImage(record)}
         <p>${escapeHtml(record.detailedDescription)}</p>
         <aside class="detail-research-note">${escapeHtml(record.noteText)}</aside>
       </div>
@@ -841,7 +849,6 @@ function renderControls(): void {
   uiElements.continentSelect.value = state.filters.continent;
   uiElements.dietSelect.value = state.filters.diet;
   uiElements.classificationSelect.value = state.filters.classification;
-  uiElements.minLengthInput.value = String(state.filters.minLength);
   uiElements.lengthRange.value = String(state.filters.maxLength);
   updateRangeLabel();
 }
@@ -872,16 +879,6 @@ uiElements.form.addEventListener('submit', (event) => {
 });
 
 uiElements.lengthRange.addEventListener('input', () => {
-  updateRangeLabel();
-  state.filters = readFilters();
-  applyFilters();
-  if (state.selectedRecordId && !state.filteredRecords.some((record) => record.id === state.selectedRecordId)) {
-    state.selectedRecordId = null;
-  }
-  renderCatalog();
-});
-
-uiElements.minLengthInput.addEventListener('input', () => {
   updateRangeLabel();
   state.filters = readFilters();
   applyFilters();
