@@ -15,6 +15,7 @@ type ReferenceEntry = {
   journal: string;
   doi?: string;
   url: string;
+  source: 'pbdb' | 'wikidata' | 'wikipedia-ja';
   kind: 'original-description' | 'redescription' | 'review' | 'database';
 };
 
@@ -45,6 +46,7 @@ type DinosaurSummary = {
 
 type DinosaurDetail = Omit<DinosaurSummary, 'localities'> & {
   meaning: string;
+  detailedDescription: string;
   ageMa: string;
   lengthMeters: number;
   massEstimateKg: number;
@@ -81,6 +83,7 @@ type WikidataEntityResponse = {
     {
       labels?: Record<string, { value: string }>;
       descriptions?: Record<string, { value: string }>;
+      sitelinks?: Record<string, { title: string }>;
     }
   >;
 };
@@ -148,10 +151,46 @@ type ExternalSnapshot = {
   wikidataId?: string;
   nameJa?: string;
   description?: string;
+  wikipediaSummaryJa?: string;
+  wikipediaArticleUrl?: string;
   pbdbTaxon?: PbdbTaxonRecord;
   localities: LocalityDetail[];
   references: ReferenceEntry[];
 };
+
+type WikipediaSummaryResponse = {
+  extract?: string;
+  content_urls?: {
+    desktop?: {
+      page?: string;
+    };
+  };
+};
+
+type CrossrefWorkResponse = {
+  message?: {
+    title?: string[];
+    author?: Array<{
+      family?: string;
+      given?: string;
+    }>;
+    'container-title'?: string[];
+    DOI?: string;
+    URL?: string;
+    published?: {
+      'date-parts'?: number[][];
+    };
+    'published-print'?: {
+      'date-parts'?: number[][];
+    };
+    'published-online'?: {
+      'date-parts'?: number[][];
+    };
+  };
+};
+
+type CrossrefMessage = NonNullable<CrossrefWorkResponse['message']>;
+type CrossrefAuthor = NonNullable<CrossrefMessage['author']>[number];
 
 const app = express();
 const port = Number(process.env.PORT ?? 3000);
@@ -1570,6 +1609,7 @@ async function buildDinosaurDetail(seed: SeedDinosaur): Promise<DinosaurDetail> 
   const ageMa = buildAgeLabel(pbdbTaxon);
   const occurrenceCount = pbdbTaxon?.n_occs ?? snapshot.localities.length;
   const summary = buildSummary(seed, snapshot.description, occurrenceCount, period);
+  const detailedDescription = buildDetailedDescription(seed, snapshot.wikipediaSummaryJa, summary);
   const significance = buildSignificance(seed, occurrenceCount, snapshot.localities.length, snapshot.references.length);
 
   return {
@@ -1577,6 +1617,7 @@ async function buildDinosaurDetail(seed: SeedDinosaur): Promise<DinosaurDetail> 
     nameJa: snapshot.nameJa ?? seed.fallbackNameJa,
     nameEn: seed.scientificName,
     meaning: seed.meaning,
+    detailedDescription,
     clade: seed.clade,
     subgroup: seed.subgroup,
     diet: seed.diet,
@@ -1613,26 +1654,26 @@ async function loadExternalSnapshot(seed: SeedDinosaur): Promise<ExternalSnapsho
     }
   });
 
-  const fetchedReferences = await Promise.allSettled([...referenceNos].map((referenceNo) => fetchPbdbReference(referenceNo)));
-  const literature = fetchedReferences
-    .flatMap((entry, index) => {
-      if (entry.status !== 'fulfilled' || !entry.value) {
-        return [];
-      }
-      return [toReferenceEntry(entry.value, index === 0 ? 'original-description' : 'review')];
-    })
-    .filter(Boolean);
+  const literature = await fetchLiteratureReferenceEntries([...referenceNos]);
 
   const wikidata = wikidataResult.status === 'fulfilled' ? wikidataResult.value : undefined;
-  const databaseReferences = buildDatabaseReferences(seed, pbdbTaxon, wikidata?.wikidataId);
+  const wikipediaSummary = await fetchJapaneseWikipediaSummary(seed, wikidata?.nameJa, wikidata?.jaWikipediaTitle);
+  const databaseReferences = buildDatabaseReferenceEntries(
+    seed,
+    pbdbTaxon,
+    wikidata?.wikidataId,
+    wikipediaSummary?.articleUrl,
+  );
 
   return {
     wikidataId: wikidata?.wikidataId,
     nameJa: wikidata?.nameJa,
     description: wikidata?.description,
+    wikipediaSummaryJa: wikipediaSummary?.extract,
+    wikipediaArticleUrl: wikipediaSummary?.articleUrl,
     pbdbTaxon,
     localities,
-    references: [...literature, ...databaseReferences],
+    references: dedupeReferenceEntries([...literature, ...databaseReferences]),
   };
 }
 
@@ -1725,6 +1766,14 @@ function buildSummary(seed: SeedDinosaur, description: string | undefined, occur
   return `${base} PaleoBioDB では ${occurrenceCount} 件の産出記録が確認でき、${period} の情報に接続できます。`;
 }
 
+function buildDetailedDescription(seed: SeedDinosaur, wikipediaSummaryJa: string | undefined, summary: string): string {
+  const normalized = wikipediaSummaryJa?.replace(/\s+/g, ' ').trim();
+  if (normalized) {
+    return normalized;
+  }
+  return `${seed.fallbackNameJa}は、${seed.meaning}として知られる恐竜です。${summary}`;
+}
+
 function buildSignificance(seed: SeedDinosaur, occurrenceCount: number | undefined, localityCount: number, referenceCount: number): string {
   const pieces = [
     occurrenceCount ? `PBDB occurrence ${occurrenceCount} 件` : undefined,
@@ -1739,15 +1788,89 @@ function buildSignificance(seed: SeedDinosaur, occurrenceCount: number | undefin
   return `${pieces.join(' / ')} をライブ取得しています。`;
 }
 
-function buildDatabaseReferences(seed: SeedDinosaur, pbdbTaxon?: PbdbTaxonRecord, wikidataId?: string): ReferenceEntry[] {
+async function fetchLiteratureReferenceEntries(referenceNos: string[]): Promise<ReferenceEntry[]> {
+  const pbdbEntries = await fetchPbdbReferenceEntries(referenceNos);
+  return enrichReferenceEntriesWithCrossref(pbdbEntries);
+}
+
+async function fetchPbdbReferenceEntries(referenceNos: string[]): Promise<ReferenceEntry[]> {
+  const fetchedReferences = await Promise.allSettled(referenceNos.map((referenceNo) => fetchPbdbReference(referenceNo)));
+  return fetchedReferences.flatMap((entry, index) => {
+    if (entry.status !== 'fulfilled' || !entry.value) {
+      return [];
+    }
+
+    return [toPbdbReferenceEntry(entry.value, index === 0 ? 'original-description' : 'review')];
+  });
+}
+
+async function enrichReferenceEntriesWithCrossref(entries: ReferenceEntry[]): Promise<ReferenceEntry[]> {
+  const uniqueDois = [...new Set(entries.map((entry) => entry.doi?.trim()).filter((doi): doi is string => Boolean(doi)))];
+  if (uniqueDois.length === 0) {
+    return entries;
+  }
+
+  const crossrefResults = await Promise.allSettled(uniqueDois.map((doi) => fetchCrossrefWork(doi)));
+  const crossrefByDoi = new Map<string, CrossrefWorkResponse['message']>();
+
+  crossrefResults.forEach((result, index) => {
+    if (result.status === 'fulfilled' && result.value) {
+      crossrefByDoi.set(uniqueDois[index].toLowerCase(), result.value);
+    }
+  });
+
+  return entries.map((entry) => mergeCrossrefIntoReference(entry, crossrefByDoi.get(entry.doi?.toLowerCase() ?? '')));
+}
+
+function mergeCrossrefIntoReference(
+  entry: ReferenceEntry,
+  crossref?: CrossrefMessage,
+): ReferenceEntry {
+  if (!crossref) {
+    return entry;
+  }
+
+  const crossrefTitle = crossref.title?.[0]?.trim();
+  const crossrefAuthors = formatCrossrefAuthors(crossref.author);
+  const crossrefJournal = crossref['container-title']?.[0]?.trim();
+  const crossrefYear = readCrossrefYear(crossref);
+
+  return {
+    ...entry,
+    title: crossrefTitle || entry.title,
+    authors: crossrefAuthors || entry.authors,
+    journal: crossrefJournal || entry.journal,
+    year: crossrefYear ?? entry.year,
+    doi: crossref.DOI || entry.doi,
+  };
+}
+
+function buildDatabaseReferenceEntries(
+  seed: SeedDinosaur,
+  pbdbTaxon?: PbdbTaxonRecord,
+  wikidataId?: string,
+  wikipediaArticleUrl?: string,
+): ReferenceEntry[] {
   const pbdbQuery = `https://paleobiodb.org/data1.2/taxa/single.json?name=${encodeURIComponent(seed.pbdbName)}&show=attr,app&vocab=pbdb`;
   return [
+    wikipediaArticleUrl
+      ? {
+          title: `Japanese Wikipedia: ${seed.fallbackNameJa}`,
+          authors: 'Wikipedia contributors',
+          year: new Date().getFullYear(),
+          journal: 'Japanese Wikipedia',
+          url: wikipediaArticleUrl,
+          source: 'wikipedia-ja',
+          kind: 'database' as const,
+        }
+      : undefined,
     {
       title: `Wikidata item: ${seed.scientificName}`,
       authors: 'Wikidata contributors',
       year: new Date().getFullYear(),
       journal: 'Wikidata',
       url: wikidataId ? `https://www.wikidata.org/wiki/${wikidataId}` : `https://www.wikidata.org/w/index.php?search=${encodeURIComponent(seed.scientificName)}`,
+      source: 'wikidata',
       kind: 'database',
     },
     {
@@ -1756,9 +1879,10 @@ function buildDatabaseReferences(seed: SeedDinosaur, pbdbTaxon?: PbdbTaxonRecord
       year: new Date().getFullYear(),
       journal: 'PaleoBioDB',
       url: pbdbQuery,
+      source: 'pbdb',
       kind: 'database',
     },
-  ];
+  ].filter((reference): reference is ReferenceEntry => Boolean(reference));
 }
 
 function buildFallbackDetail(seed: SeedDinosaur): DinosaurDetail {
@@ -1767,6 +1891,7 @@ function buildFallbackDetail(seed: SeedDinosaur): DinosaurDetail {
     nameJa: seed.fallbackNameJa,
     nameEn: seed.scientificName,
     meaning: seed.meaning,
+    detailedDescription: `${seed.fallbackNameJa}は、${seed.meaning}として知られる恐竜です。${seed.scientificName} のライブデータ取得に失敗したため、ローカルのフォールバック情報を表示しています。`,
     clade: seed.clade,
     subgroup: seed.subgroup,
     diet: seed.diet,
@@ -1796,17 +1921,27 @@ function fallbackLocality(seed: SeedDinosaur): LocalityDetail {
 function fallbackReferences(seed: SeedDinosaur): ReferenceEntry[] {
   return [
     {
+      title: `Japanese Wikipedia search: ${seed.fallbackNameJa}`,
+      authors: 'Wikipedia contributors',
+      year: new Date().getFullYear(),
+      journal: 'Japanese Wikipedia',
+      url: `https://ja.wikipedia.org/w/index.php?search=${encodeURIComponent(seed.fallbackNameJa)}`,
+      source: 'wikipedia-ja',
+      kind: 'database',
+    },
+    {
       title: `Wikidata item: ${seed.scientificName}`,
       authors: 'Wikidata contributors',
       year: new Date().getFullYear(),
       journal: 'Wikidata',
       url: `https://www.wikidata.org/w/index.php?search=${encodeURIComponent(seed.scientificName)}`,
+      source: 'wikidata',
       kind: 'database',
     },
   ];
 }
 
-function toReferenceEntry(record: PbdbReferenceRecord, kind: ReferenceEntry['kind']): ReferenceEntry {
+function toPbdbReferenceEntry(record: PbdbReferenceRecord, kind: ReferenceEntry['kind']): ReferenceEntry {
   const year = Number(record.pubyr ?? '') || new Date().getFullYear();
   const authors = buildAuthors(record);
   const journalParts = [record.pubtitle, record.pubvol].filter(Boolean);
@@ -1817,8 +1952,22 @@ function toReferenceEntry(record: PbdbReferenceRecord, kind: ReferenceEntry['kin
     journal: journalParts.join(' ') || 'PaleoBioDB reference',
     doi: record.doi,
     url: `https://paleobiodb.org/data1.2/refs/single.json?id=ref:${record.reference_no ?? ''}&vocab=pbdb`,
+    source: 'pbdb',
     kind,
   };
+}
+
+function dedupeReferenceEntries(entries: ReferenceEntry[]): ReferenceEntry[] {
+  const deduped = new Map<string, ReferenceEntry>();
+
+  entries.forEach((entry) => {
+    const key = entry.doi?.toLowerCase() ?? `${entry.title.toLowerCase()}::${entry.year}`;
+    if (!deduped.has(key)) {
+      deduped.set(key, entry);
+    }
+  });
+
+  return [...deduped.values()];
 }
 
 function buildAuthors(record: PbdbReferenceRecord): string {
@@ -1871,7 +2020,9 @@ function uniqueSorted(values: string[]): string[] {
   return [...new Set(values)].sort((left, right) => left.localeCompare(right));
 }
 
-async function fetchWikidataEntity(searchName: string): Promise<{ wikidataId?: string; nameJa?: string; description?: string }> {
+async function fetchWikidataEntity(
+  searchName: string,
+): Promise<{ wikidataId?: string; nameJa?: string; description?: string; jaWikipediaTitle?: string }> {
   const searchUrl = `https://www.wikidata.org/w/api.php?action=wbsearchentities&format=json&language=en&type=item&limit=5&search=${encodeURIComponent(searchName)}&origin=*`;
   const searchPayload = await fetchJson<WikidataSearchResponse>(searchUrl);
   const match =
@@ -1885,14 +2036,43 @@ async function fetchWikidataEntity(searchName: string): Promise<{ wikidataId?: s
   }
 
   const qid = match.id;
-  const url = `https://www.wikidata.org/w/api.php?action=wbgetentities&format=json&ids=${qid}&languages=ja|en&props=labels|descriptions&origin=*`;
+  const url = `https://www.wikidata.org/w/api.php?action=wbgetentities&format=json&ids=${qid}&languages=ja|en&props=labels|descriptions|sitelinks&origin=*`;
   const payload = await fetchJson<WikidataEntityResponse>(url);
   const entity = payload.entities?.[qid];
   return {
     wikidataId: qid,
     nameJa: pickLocalizedValue(entity?.labels),
     description: pickLocalizedValue(entity?.descriptions) ?? match.description,
+    jaWikipediaTitle: entity?.sitelinks?.jawiki?.title,
   };
+}
+
+async function fetchWikipediaSummary(title: string): Promise<{ extract?: string; articleUrl?: string }> {
+  const url = `https://ja.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
+  const payload = await fetchJson<WikipediaSummaryResponse>(url);
+  return {
+    extract: payload.extract,
+    articleUrl: payload.content_urls?.desktop?.page,
+  };
+}
+
+async function fetchJapaneseWikipediaSummary(
+  seed: SeedDinosaur,
+  localizedName?: string,
+  jaWikipediaTitle?: string,
+): Promise<{ extract?: string; articleUrl?: string } | undefined> {
+  const candidates = [seed.fallbackNameJa, localizedName, jaWikipediaTitle, seed.scientificName]
+    .filter((value): value is string => Boolean(value?.trim()))
+    .filter((value, index, values) => values.indexOf(value) === index);
+
+  for (const candidate of candidates) {
+    const summary = await fetchWikipediaSummary(candidate).catch(() => undefined);
+    if (summary?.extract) {
+      return summary;
+    }
+  }
+
+  return undefined;
 }
 
 async function fetchPbdbTaxon(name: string): Promise<PbdbTaxonRecord | undefined> {
@@ -1913,6 +2093,12 @@ async function fetchPbdbReference(referenceNo: string): Promise<PbdbReferenceRec
   return payload.records?.[0];
 }
 
+async function fetchCrossrefWork(doi: string): Promise<CrossrefWorkResponse['message'] | undefined> {
+  const url = `https://api.crossref.org/works/${encodeURIComponent(doi)}`;
+  const payload = await fetchJson<CrossrefWorkResponse>(url);
+  return payload.message;
+}
+
 async function fetchJson<T>(url: string): Promise<T> {
   const response = await fetch(url, {
     headers: {
@@ -1930,6 +2116,26 @@ async function fetchJson<T>(url: string): Promise<T> {
 
 function pickLocalizedValue(record?: Record<string, { value: string }>): string | undefined {
   return record?.ja?.value ?? record?.en?.value;
+}
+
+function formatCrossrefAuthors(authors?: CrossrefAuthor[]): string | undefined {
+  const names = authors
+    ?.map((author: CrossrefAuthor) => [author.family, author.given].filter(Boolean).join(' ').trim())
+    .filter(Boolean);
+
+  if (!names || names.length === 0) {
+    return undefined;
+  }
+
+  return names.join(', ');
+}
+
+function readCrossrefYear(message?: CrossrefMessage): number | undefined {
+  const year = message?.published?.['date-parts']?.[0]?.[0]
+    ?? message?.['published-print']?.['date-parts']?.[0]?.[0]
+    ?? message?.['published-online']?.['date-parts']?.[0]?.[0];
+
+  return typeof year === 'number' ? year : undefined;
 }
 
 app.listen(port, () => {

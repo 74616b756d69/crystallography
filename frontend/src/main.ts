@@ -20,6 +20,7 @@ type ReferenceEntry = {
   journal: string;
   doi?: string;
   url: string;
+  source: 'pbdb' | 'wikidata' | 'wikipedia-ja';
   kind: 'original-description' | 'redescription' | 'review' | 'database';
 };
 
@@ -42,6 +43,7 @@ type LocalityDetail = LocalitySummary & {
 
 type DinosaurDetail = Omit<DinosaurSummary, 'localities'> & {
   meaning: string;
+  detailedDescription: string;
   ageMa: string;
   lengthMeters: number;
   massEstimateKg: number;
@@ -95,6 +97,7 @@ type Filters = {
   continent: ContinentOption;
   diet: DietOption;
   classification: ClassificationOption;
+  minLength: number;
   maxLength: number;
 };
 
@@ -163,6 +166,12 @@ app.innerHTML = `
 
               <label class="search-block search-range">
                 <span>大きさ（体長）</span>
+                <div class="range-inputs">
+                  <label>
+                    <small>以上</small>
+                    <input id="min-length-input" name="minLength" type="number" min="0" max="40" step="0.5" value="0" />
+                  </label>
+                </div>
                 <input id="length-range" name="maxLength" type="range" min="0" max="40" step="1" value="40" />
                 <strong id="range-value">0m 〜 40m</strong>
               </label>
@@ -202,6 +211,7 @@ const ui = {
   continentSelect: document.querySelector<HTMLSelectElement>('#continent-select'),
   dietSelect: document.querySelector<HTMLSelectElement>('#diet-select'),
   classificationSelect: document.querySelector<HTMLSelectElement>('#classification-select'),
+  minLengthInput: document.querySelector<HTMLInputElement>('#min-length-input'),
   lengthRange: document.querySelector<HTMLInputElement>('#length-range'),
   rangeValue: document.querySelector<HTMLElement>('#range-value'),
   catalogTitle: document.querySelector<HTMLElement>('#catalog-title'),
@@ -219,6 +229,7 @@ if (
   !ui.continentSelect ||
   !ui.dietSelect ||
   !ui.classificationSelect ||
+  !ui.minLengthInput ||
   !ui.lengthRange ||
   !ui.rangeValue ||
   !ui.catalogTitle ||
@@ -238,6 +249,7 @@ const uiElements = {
   continentSelect: ui.continentSelect,
   dietSelect: ui.dietSelect,
   classificationSelect: ui.classificationSelect,
+  minLengthInput: ui.minLengthInput,
   lengthRange: ui.lengthRange,
   rangeValue: ui.rangeValue,
   catalogTitle: ui.catalogTitle,
@@ -261,6 +273,7 @@ const state: {
     continent: 'すべて',
     diet: 'すべて',
     classification: 'すべて',
+    minLength: 0,
     maxLength: 40,
   },
 };
@@ -426,18 +439,27 @@ function toNotebookRecord(record: DinosaurDetail): NotebookRecord {
 }
 
 function readFilters(): Filters {
+  const rawMinLength = Number(uiElements.minLengthInput.value);
+  const rawMaxLength = Number(uiElements.lengthRange.value);
+  const minLength = Number.isFinite(rawMinLength) ? Math.max(0, Math.min(40, rawMinLength)) : 0;
+  const maxLength = Number.isFinite(rawMaxLength) ? Math.max(0, Math.min(40, rawMaxLength)) : 40;
+
   return {
     keyword: uiElements.keywordInput.value.trim(),
     era: uiElements.eraSelect.value as EraOption,
     continent: uiElements.continentSelect.value as ContinentOption,
     diet: uiElements.dietSelect.value as DietOption,
     classification: uiElements.classificationSelect.value as ClassificationOption,
-    maxLength: Number(uiElements.lengthRange.value),
+    minLength: Math.min(minLength, maxLength),
+    maxLength: Math.max(minLength, maxLength),
   };
 }
 
 function updateRangeLabel(): void {
-  uiElements.rangeValue.textContent = `0m 〜 ${uiElements.lengthRange.value}m`;
+  const filters = readFilters();
+  uiElements.minLengthInput.value = String(filters.minLength);
+  uiElements.lengthRange.value = String(filters.maxLength);
+  uiElements.rangeValue.textContent = `${filters.minLength}m 〜 ${filters.maxLength}m`;
 }
 
 function getSelectedRecordIdFromUrl(): string | null {
@@ -505,12 +527,16 @@ function applyFilters(): void {
     if (state.filters.classification !== 'すべて' && record.classificationLabel !== state.filters.classification) {
       return false;
     }
-    return record.lengthMeters <= state.filters.maxLength;
+    return record.lengthMeters >= state.filters.minLength && record.lengthMeters <= state.filters.maxLength;
   });
 }
 
 function formatMass(mass: number): string {
-  return `${Math.round(mass).toLocaleString()}kg`;
+  return `推定${Math.round(mass).toLocaleString()}kg`;
+}
+
+function formatLength(lengthMeters: number): string {
+  return `約${lengthMeters.toFixed(1)}m`;
 }
 
 function buildMapMarker(locality: LocalityDetail): string {
@@ -605,7 +631,7 @@ function renderCard(record: NotebookRecord, index: number): string {
         </div>
         <div>
           <dt>体長・体重</dt>
-          <dd>${escapeHtml(`${record.lengthMeters.toFixed(1)}m / ${formatMass(record.massEstimateKg)}`)}</dd>
+          <dd>${escapeHtml(`${formatLength(record.lengthMeters)} / ${formatMass(record.massEstimateKg)}`)}</dd>
         </div>
         <div>
           <dt>分類</dt>
@@ -636,6 +662,7 @@ function renderReferences(record: NotebookRecord): string {
         .map(
           (reference) => `
             <li>
+              <span class="reference-source">${escapeHtml(formatReferenceSource(reference.source))}</span>
               <a href="${escapeHtml(reference.url)}" target="_blank" rel="noreferrer">
                 ${escapeHtml(reference.title)}
               </a>
@@ -646,6 +673,16 @@ function renderReferences(record: NotebookRecord): string {
         .join('')}
     </ul>
   `;
+}
+
+function formatReferenceSource(source: ReferenceEntry['source']): string {
+  if (source === 'pbdb') {
+    return 'PaleoBioDB';
+  }
+  if (source === 'wikidata') {
+    return 'Wikidata';
+  }
+  return 'Wikipedia JA';
 }
 
 function renderLocalityNotes(record: NotebookRecord): string {
@@ -668,6 +705,20 @@ function renderLocalityNotes(record: NotebookRecord): string {
         )
         .join('')}
     </ul>
+  `;
+}
+
+function renderDetailMap(record: NotebookRecord): string {
+  if (record.localities.length === 0) {
+    return '<p class="detail-empty">地図に表示できる産地座標はまだありません。</p>';
+  }
+
+  return `
+    <section class="map-frame detail-map-frame" aria-label="詳細ページの産地マップ">
+      <h4>産地マップ</h4>
+      ${renderMapSvg(record.localities)}
+      <p class="detail-map-caption">地図上の印は詳細に表示している産地 ${record.localities.length} 件を示しています。</p>
+    </section>
   `;
 }
 
@@ -697,7 +748,7 @@ function renderDetailPanel(): void {
       </div>
 
       <div class="detail-summary-block">
-        <p>${escapeHtml(record.summary)}</p>
+        <p>${escapeHtml(record.detailedDescription)}</p>
         <aside class="detail-research-note">${escapeHtml(record.noteText)}</aside>
       </div>
 
@@ -711,8 +762,8 @@ function renderDetailPanel(): void {
           <dl class="detail-stats">
             <div><dt>年代</dt><dd>${escapeHtml(record.period)}</dd></div>
             <div><dt>年代幅</dt><dd>${escapeHtml(record.ageMa)}</dd></div>
-            <div><dt>体長</dt><dd>${escapeHtml(`${record.lengthMeters.toFixed(1)}m`)}</dd></div>
-            <div><dt>体重</dt><dd>${escapeHtml(formatMass(record.massEstimateKg))}</dd></div>
+            <div><dt>体長</dt><dd>${escapeHtml(formatLength(record.lengthMeters))}</dd></div>
+            <div><dt>推定体重</dt><dd>${escapeHtml(formatMass(record.massEstimateKg))}</dd></div>
           </dl>
         </section>
       </div>
@@ -720,6 +771,7 @@ function renderDetailPanel(): void {
       <div class="detail-meta-grid">
         <section class="detail-box">
           <h4>地図表示用の産地</h4>
+          ${renderDetailMap(record)}
           ${renderLocalityNotes(record)}
         </section>
         <section class="detail-box">
@@ -789,6 +841,7 @@ function renderControls(): void {
   uiElements.continentSelect.value = state.filters.continent;
   uiElements.dietSelect.value = state.filters.diet;
   uiElements.classificationSelect.value = state.filters.classification;
+  uiElements.minLengthInput.value = String(state.filters.minLength);
   uiElements.lengthRange.value = String(state.filters.maxLength);
   updateRangeLabel();
 }
@@ -819,6 +872,16 @@ uiElements.form.addEventListener('submit', (event) => {
 });
 
 uiElements.lengthRange.addEventListener('input', () => {
+  updateRangeLabel();
+  state.filters = readFilters();
+  applyFilters();
+  if (state.selectedRecordId && !state.filteredRecords.some((record) => record.id === state.selectedRecordId)) {
+    state.selectedRecordId = null;
+  }
+  renderCatalog();
+});
+
+uiElements.minLengthInput.addEventListener('input', () => {
   updateRangeLabel();
   state.filters = readFilters();
   applyFilters();

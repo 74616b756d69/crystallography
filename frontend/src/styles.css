@@ -223,6 +223,33 @@ ul {
   margin: 4px 0 0;
 }
 
+.range-inputs {
+  display: flex;
+  gap: 12px;
+  align-items: end;
+}
+
+.range-inputs label {
+  display: grid;
+  gap: 4px;
+  max-width: 160px;
+}
+
+.range-inputs small {
+  color: var(--line);
+  font-family: 'Caveat', cursive;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.range-inputs input[type='number'] {
+  width: 100%;
+  background: var(--card);
+  border: 1.5px solid var(--line);
+  color: var(--ink);
+  padding: 9px 10px;
+}
+
 .search-range strong {
   color: var(--heading);
   font-family: 'Caveat', cursive;
@@ -321,7 +348,8 @@ ul {
 .detail-summary-block > p,
 .detail-box p,
 .detail-locality-list span,
-.detail-reference-list p {
+.detail-reference-list p,
+.detail-map-caption {
   color: var(--ink);
   font-size: 13px;
   line-height: 2;
@@ -350,6 +378,19 @@ ul {
   color: var(--heading);
   font-size: 16px;
   font-weight: 700;
+}
+
+.detail-map-frame {
+  margin-top: 10px;
+  background: rgba(200, 180, 130, 0.08);
+}
+
+.detail-map-frame svg {
+  min-height: 180px;
+}
+
+.detail-map-caption {
+  margin-top: 6px;
 }
 
 .detail-stats {
@@ -408,6 +449,17 @@ ul {
 
 .detail-locality-list span {
   display: block;
+}
+
+.reference-source {
+  display: inline-block;
+  margin-bottom: 4px;
+  border: 1px solid rgba(138, 96, 48, 0.35);
+  padding: 2px 8px;
+  color: var(--line);
+  font-family: 'Caveat', cursive;
+  font-size: 14px;
+  font-weight: 700;
 }
 
 .detail-reference-list a:hover,
