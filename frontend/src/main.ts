@@ -528,6 +528,10 @@ function formatLength(lengthMeters: number): string {
   return `約${lengthMeters.toFixed(1)}m`;
 }
 
+function hasResolvedCoordinates(locality: LocalityDetail): boolean {
+  return Number.isFinite(locality.coordinates.lat) && Number.isFinite(locality.coordinates.lng) && !(locality.coordinates.lat === 0 && locality.coordinates.lng === 0);
+}
+
 function buildMapMarker(locality: LocalityDetail): string {
   const viewBoxWidth = 100;
   const viewBoxHeight = 52;
@@ -537,7 +541,7 @@ function buildMapMarker(locality: LocalityDetail): string {
 }
 
 function renderMapSvg(localities: LocalityDetail[]): string {
-  const markers = localities.slice(0, 6).map(buildMapMarker).join('');
+  const markers = localities.filter(hasResolvedCoordinates).slice(0, 6).map(buildMapMarker).join('');
   return `
     <svg viewBox="0 0 100 52" aria-label="産地マップ枠">
       <g class="map-grain" fill="none">
@@ -698,15 +702,17 @@ function renderLocalityNotes(record: NotebookRecord): string {
 }
 
 function renderDetailMap(record: NotebookRecord): string {
-  if (record.localities.length === 0) {
+  const mappedLocalities = record.localities.filter(hasResolvedCoordinates);
+
+  if (mappedLocalities.length === 0) {
     return '<p class="detail-empty">地図に表示できる産地座標はまだありません。</p>';
   }
 
   return `
     <section class="map-frame detail-map-frame" aria-label="詳細ページの産地マップ">
       <h4>産地マップ</h4>
-      ${renderMapSvg(record.localities)}
-      <p class="detail-map-caption">地図上の印は詳細に表示している産地 ${record.localities.length} 件を示しています。</p>
+      ${renderMapSvg(mappedLocalities)}
+      <p class="detail-map-caption">地図上の印は詳細に表示している産地 ${mappedLocalities.length} 件を示しています。</p>
     </section>
   `;
 }
