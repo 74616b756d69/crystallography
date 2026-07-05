@@ -494,11 +494,14 @@ ul {
 
 .scale-bar {
   position: absolute;
+  top: 6px;
   right: 8px;
-  bottom: 6px;
   display: flex;
   align-items: center;
   gap: 4px;
+  padding: 1px 6px;
+  background: rgba(250, 243, 224, 0.78);
+  border-radius: 3px;
 }
 
 .scale-bar i {
