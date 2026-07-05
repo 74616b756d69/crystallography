@@ -1,8 +1,19 @@
 import './styles.css';
+import { loadAssetManifests, resolveImage, resolveModel, formatCredit, type AssetCredit } from './assets';
+import { mountViewer3D, type Viewer3D } from './viewer3d';
+import type { GestureController, GestureStatus } from './gesture';
 
 type GeoPoint = {
   lat: number;
   lng: number;
+};
+
+type ImageInfo = {
+  url: string;
+  credit?: string;
+  license?: string;
+  source: string;
+  sourceUrl?: string;
 };
 
 type LocalitySummary = {
@@ -33,6 +44,7 @@ type DinosaurSummary = {
   period: string;
   region: string;
   summary: string;
+  image?: ImageInfo;
   localities: LocalitySummary[];
 };
 
@@ -120,7 +132,13 @@ app.innerHTML = `
           <h1>恐竜図鑑　野外記録</h1>
           <p class="subtitle">Field Notes — Dinosaur Fossil Records</p>
         </div>
-        <p class="header-note">文化祭　展示 / 調査ノート　第一冊</p>
+        <div class="header-side">
+          <p class="header-note">文化祭　展示 / 調査ノート　第一冊</p>
+          <button type="button" id="gesture-toggle" class="gesture-toggle" aria-pressed="false">
+            <span class="gesture-toggle-icon" aria-hidden="true">🖐️</span>
+            <span class="gesture-toggle-label">ジェスチャー操作</span>
+          </button>
+        </div>
       </header>
 
       <div class="wave-divider" aria-hidden="true">${renderWave(false)}</div>
@@ -186,6 +204,25 @@ app.innerHTML = `
       </footer>
     </main>
     <p class="page-number">p. 01</p>
+
+    <div id="gesture-layer" class="gesture-layer" hidden>
+      <div id="gesture-cursor" class="gesture-cursor" aria-hidden="true"></div>
+      <div class="gesture-hud">
+        <div class="gesture-cam">
+          <video id="gesture-video" playsinline muted></video>
+          <span class="gesture-cam-dot" aria-hidden="true"></span>
+        </div>
+        <div class="gesture-hud-text">
+          <p id="gesture-status" class="gesture-status">準備中…</p>
+          <ul class="gesture-hints">
+            <li>☝️ 人差し指で<strong>カーソル移動</strong></li>
+            <li>🤏 つまんで<strong>決定</strong></li>
+            <li>🖐️ 手を開いて<strong>戻る</strong></li>
+          </ul>
+          <button type="button" id="gesture-exit" class="gesture-exit">終了する</button>
+        </div>
+      </div>
+    </div>
   </div>
 `;
 
@@ -481,6 +518,50 @@ function formatMass(mass: number): string {
   return `${Math.round(mass).toLocaleString()}kg`;
 }
 
+// 分類に応じたシルエット（画像が無いときのプレースホルダー用）。
+function silhouettePath(classification: ClassificationOption): string {
+  if (classification === '竜脚類') {
+    // 長い首の竜脚類
+    return 'M6,60 C10,58 14,58 18,60 C22,54 24,40 30,30 C34,22 40,16 44,14 C46,10 50,8 54,10 C56,12 55,16 52,18 C48,22 44,30 42,40 C48,42 58,44 66,46 C74,48 82,52 88,60 C86,62 82,62 78,60 C72,58 64,56 58,56 C56,60 54,64 50,64 C48,62 48,60 48,58 C40,58 30,58 24,62 C22,64 18,64 16,62 C12,64 8,64 6,60 Z';
+  }
+  if (classification === '獣脚類') {
+    // 二足歩行の獣脚類
+    return 'M12,58 C14,54 18,52 22,52 C24,46 26,40 32,36 C30,32 30,28 34,26 C36,22 42,20 48,22 C54,22 60,26 64,32 C70,34 78,38 84,46 C80,48 74,48 70,46 C66,48 60,48 56,46 C54,52 52,58 50,62 C48,64 46,64 45,62 C46,56 47,50 46,46 C42,48 38,52 36,58 C38,60 38,63 35,63 C32,63 31,60 32,58 C28,58 24,58 22,60 C24,62 24,64 21,64 C18,64 17,61 18,59 C15,60 13,60 12,58 Z';
+  }
+  // 四足歩行（鳥盤類・角竜・剣竜など）
+  return 'M8,54 C10,48 16,44 24,42 C28,36 34,32 42,32 C50,32 58,36 62,42 C72,44 82,48 88,56 C84,58 78,58 74,56 C74,60 72,64 68,64 C65,64 64,60 65,57 C56,58 46,58 38,57 C39,60 38,64 34,64 C31,64 30,60 31,57 C24,58 16,58 12,60 C13,62 12,64 9,63 C6,62 6,58 8,56 Z';
+}
+
+// 画像 or シルエットのメディア枠を作る。
+function renderMedia(record: NotebookRecord, variant: 'card' | 'detail'): string {
+  const image = resolveImage(record.id, record.image);
+  const scale = `<div class="scale-bar"><i></i><strong>${escapeHtml(`${record.lengthMeters.toFixed(1)}m`)}</strong></div>`;
+
+  if (image) {
+    const credit = formatCredit(image);
+    const creditMarkup = credit
+      ? `<figcaption class="media-credit">© ${escapeHtml(credit)}</figcaption>`
+      : '';
+    return `
+      <figure class="media-frame media-frame-photo media-${variant}">
+        <img src="${escapeHtml(image.url)}" alt="${escapeHtml(record.nameJa)}の写真" loading="lazy" decoding="async" referrerpolicy="no-referrer" />
+        ${scale}
+        ${creditMarkup}
+      </figure>
+    `;
+  }
+
+  return `
+    <figure class="media-frame media-frame-placeholder media-${variant}">
+      <svg viewBox="0 0 96 72" class="media-silhouette" aria-hidden="true">
+        <path d="${silhouettePath(record.classificationLabel)}" />
+      </svg>
+      <span class="media-caption">画像準備中 — ${escapeHtml(record.classificationLabel)}</span>
+      ${scale}
+    </figure>
+  `;
+}
+
 function buildMapMarker(locality: LocalityDetail): string {
   const viewBoxWidth = 100;
   const viewBoxHeight = 52;
@@ -557,10 +638,7 @@ function renderCard(record: NotebookRecord, index: number): string {
       <h3>${escapeHtml(record.nameJa)}</h3>
       <p class="scientific-name">${escapeHtml(record.nameEn)}</p>
 
-      <div class="skeleton-frame">
-        <span class="skeleton-caption">骨格スケッチ（側面）</span>
-        <div class="scale-bar"><i></i><strong>2m</strong></div>
-      </div>
+      ${renderMedia(record, 'card')}
 
       <dl class="data-grid">
         <div>
@@ -639,18 +717,32 @@ function renderLocalityNotes(record: NotebookRecord): string {
   `;
 }
 
+// 直前の 3D ビューアを破棄する（詳細を閉じる/切り替える際に呼ぶ）。
+let activeViewer: Viewer3D | null = null;
+
+function disposeActiveViewer(): void {
+  activeViewer?.dispose();
+  activeViewer = null;
+}
+
 function renderDetailPanel(): void {
+  disposeActiveViewer();
   const record = state.records.find((entry) => entry.id === state.selectedRecordId);
 
   if (!record) {
     uiElements.detailPanel.innerHTML = `
       <div class="detail-panel-empty">
         <p class="detail-kicker">調査メモの詳細</p>
-        <p class="detail-empty">一覧カードの付箋から詳細を開くと、外部データ要約と文献導線をここに表示します。</p>
+        <p class="detail-empty">一覧カードの付箋から詳細を開くと、写真・3D 骨格・外部データ要約をここに表示します。</p>
       </div>
     `;
     return;
   }
+
+  const model = resolveModel(record.id);
+  const modelCredit = model && formatCredit(model)
+    ? `<p class="viewer-credit">3D: ${escapeHtml(formatCredit(model))}</p>`
+    : '<p class="viewer-credit">3D モデル未登録 — プレースホルダー表示中</p>';
 
   uiElements.detailPanel.innerHTML = `
     <article class="detail-sheet">
@@ -661,6 +753,16 @@ function renderDetailPanel(): void {
           <p class="detail-scientific">${escapeHtml(record.nameEn)}</p>
         </div>
         <button type="button" class="detail-close" data-detail-close="true">一覧へ戻る</button>
+      </div>
+
+      <div class="detail-showcase">
+        ${renderMedia(record, 'detail')}
+        <div class="detail-viewer">
+          <div class="detail-viewer-3d" id="detail-viewer-3d">
+            <span class="viewer-hint">ドラッグで回転 / ホイールで拡大</span>
+          </div>
+          ${modelCredit}
+        </div>
       </div>
 
       <div class="detail-summary-block">
@@ -696,6 +798,16 @@ function renderDetailPanel(): void {
       </div>
     </article>
   `;
+
+  const viewerHost = uiElements.detailPanel.querySelector<HTMLElement>('#detail-viewer-3d');
+  if (viewerHost) {
+    activeViewer = mountViewer3D(viewerHost, {
+      model,
+      onStatus: (status) => {
+        viewerHost.dataset.viewerStatus = status;
+      },
+    });
+  }
 }
 
 function renderCatalog(): void {
@@ -729,6 +841,7 @@ function renderControls(): void {
 async function bootstrap(): Promise<void> {
   try {
     uiElements.resultStatus.textContent = '調査記録を収集中です。';
+    await loadAssetManifests();
     const summaries = await fetchDinosaurs();
     const details = await Promise.all(summaries.map((summary) => fetchDetail(summary.id)));
     state.records = details.map(toNotebookRecord);
@@ -816,5 +929,131 @@ uiElements.detailPanel.addEventListener('click', (event) => {
   state.selectedRecordId = null;
   renderCatalog();
 });
+
+// ---- ジェスチャー操作 ----------------------------------------------------
+
+const gestureEls = {
+  toggle: document.querySelector<HTMLButtonElement>('#gesture-toggle'),
+  layer: document.querySelector<HTMLElement>('#gesture-layer'),
+  cursor: document.querySelector<HTMLElement>('#gesture-cursor'),
+  video: document.querySelector<HTMLVideoElement>('#gesture-video'),
+  status: document.querySelector<HTMLElement>('#gesture-status'),
+  exit: document.querySelector<HTMLButtonElement>('#gesture-exit'),
+};
+
+if (
+  gestureEls.toggle &&
+  gestureEls.layer &&
+  gestureEls.cursor &&
+  gestureEls.video &&
+  gestureEls.status &&
+  gestureEls.exit
+) {
+  const g = {
+    toggle: gestureEls.toggle,
+    layer: gestureEls.layer,
+    cursor: gestureEls.cursor,
+    video: gestureEls.video,
+    status: gestureEls.status,
+    exit: gestureEls.exit,
+  };
+
+  let controller: GestureController | null = null;
+  let active = false;
+  let smoothX = window.innerWidth / 2;
+  let smoothY = window.innerHeight / 2;
+  let hovered: HTMLElement | null = null;
+
+  const setHover = (element: HTMLElement | null): void => {
+    if (hovered === element) {
+      return;
+    }
+    hovered?.classList.remove('gesture-hover');
+    element?.classList.add('gesture-hover');
+    hovered = element;
+  };
+
+  const handlePointer = (nx: number, ny: number): void => {
+    const targetX = nx * window.innerWidth;
+    const targetY = ny * window.innerHeight;
+    smoothX += (targetX - smoothX) * 0.4;
+    smoothY += (targetY - smoothY) * 0.4;
+    g.cursor.style.transform = `translate(${smoothX}px, ${smoothY}px)`;
+    const element = document.elementFromPoint(smoothX, smoothY);
+    const card = element?.closest<HTMLElement>('.catalog-card') ?? null;
+    setHover(card);
+  };
+
+  const handleSelect = (): void => {
+    g.cursor.classList.add('is-pinch');
+    window.setTimeout(() => g.cursor.classList.remove('is-pinch'), 220);
+    const element = document.elementFromPoint(smoothX, smoothY);
+    const actionable = element?.closest<HTMLElement>('.catalog-card, button, a, [data-detail-close]');
+    if (actionable) {
+      actionable.click();
+    }
+  };
+
+  const handleBack = (): void => {
+    if (state.selectedRecordId) {
+      state.selectedRecordId = null;
+      renderCatalog();
+    }
+  };
+
+  const updateStatus = (status: GestureStatus, message?: string): void => {
+    const fallback: Record<GestureStatus, string> = {
+      idle: '停止中',
+      loading: '準備中…',
+      running: '手をかざしてください',
+      'no-camera': 'カメラを利用できません',
+      error: '読み込みに失敗しました',
+    };
+    g.status.textContent = message ?? fallback[status];
+    g.layer.dataset.gestureStatus = status;
+  };
+
+  const enable = async (): Promise<void> => {
+    active = true;
+    g.toggle.setAttribute('aria-pressed', 'true');
+    g.toggle.classList.add('is-active');
+    g.layer.hidden = false;
+    document.body.classList.add('gesture-on');
+    updateStatus('loading', 'モジュールを読み込み中…');
+    // 手認識ライブラリ(重い)は有効化した瞬間に初めて読み込む。
+    const { GestureController } = await import('./gesture');
+    if (!active) {
+      return;
+    }
+    controller = new GestureController(g.video, {
+      onPointerMove: handlePointer,
+      onSelect: handleSelect,
+      onBack: handleBack,
+      onHandPresence: (present) => g.cursor.classList.toggle('is-tracking', present),
+      onStatus: updateStatus,
+    });
+    await controller.start();
+  };
+
+  const disable = (): void => {
+    active = false;
+    g.toggle.setAttribute('aria-pressed', 'false');
+    g.toggle.classList.remove('is-active');
+    g.layer.hidden = true;
+    document.body.classList.remove('gesture-on');
+    setHover(null);
+    controller?.stop();
+    controller = null;
+  };
+
+  g.toggle.addEventListener('click', () => {
+    if (active) {
+      disable();
+    } else {
+      void enable();
+    }
+  });
+  g.exit.addEventListener('click', disable);
+}
 
 void bootstrap();

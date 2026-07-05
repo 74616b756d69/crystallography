@@ -712,3 +712,337 @@ ul {
     justify-self: start;
   }
 }
+
+/* ============ 追加コンポーネント: 画像 / 3D / ジェスチャー ============ */
+
+.header-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.gesture-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: var(--card);
+  color: var(--heading);
+  border: 1.5px solid var(--heading);
+  border-radius: 999px;
+  box-shadow: 2px 2px 0 rgba(74, 48, 24, 0.16);
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+}
+
+.gesture-toggle:hover {
+  transform: translateY(-1px);
+}
+
+.gesture-toggle:active {
+  transform: translateY(1px);
+  box-shadow: 1px 1px 0 rgba(74, 48, 24, 0.16);
+}
+
+.gesture-toggle.is-active {
+  background: var(--tag);
+  color: #f7efd8;
+  border-color: var(--tag);
+}
+
+.gesture-toggle-icon {
+  font-size: 18px;
+}
+
+.gesture-toggle-label {
+  font-family: 'Caveat', cursive;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+/* ---- メディア枠（写真 / シルエット） ---- */
+
+.media-frame {
+  position: relative;
+  margin-top: 14px;
+  border: 1px solid rgba(138, 96, 48, 0.5);
+  background: rgba(200, 180, 130, 0.12);
+  overflow: hidden;
+}
+
+.media-frame-photo.media-card {
+  height: 130px;
+}
+
+.media-frame-photo.media-detail {
+  height: 260px;
+  border-width: 1.5px;
+}
+
+.media-frame-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  filter: saturate(0.92) contrast(1.02);
+}
+
+.media-frame-placeholder {
+  height: 130px;
+  border-style: dashed;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    repeating-linear-gradient(135deg, rgba(138, 96, 48, 0.05) 0 8px, transparent 8px 16px),
+    rgba(200, 180, 130, 0.12);
+}
+
+.media-frame-placeholder.media-detail {
+  height: 260px;
+}
+
+.media-silhouette {
+  width: 72%;
+  max-height: 78%;
+}
+
+.media-silhouette path {
+  fill: rgba(74, 48, 24, 0.32);
+  stroke: rgba(74, 48, 24, 0.5);
+  stroke-width: 0.6;
+}
+
+.media-caption {
+  position: absolute;
+  left: 8px;
+  bottom: 6px;
+  font-family: 'Caveat', cursive;
+  font-size: 15px;
+  color: var(--heading);
+}
+
+.media-credit {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  max-width: 100%;
+  margin: 0;
+  padding: 2px 6px;
+  font-family: 'IM Fell English', serif;
+  font-style: italic;
+  font-size: 10px;
+  line-height: 1.3;
+  color: #f3ead4;
+  background: rgba(30, 20, 8, 0.62);
+  border-top-left-radius: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- 詳細のショーケース（写真＋3D） ---- */
+
+.detail-showcase {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.detail-showcase .media-frame {
+  margin-top: 0;
+}
+
+.detail-viewer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.detail-viewer-3d {
+  position: relative;
+  height: 260px;
+  border: 1.5px solid var(--heading);
+  border-radius: 4px;
+  background:
+    radial-gradient(120% 120% at 50% 20%, rgba(250, 243, 224, 0.9), rgba(210, 188, 140, 0.35)),
+    var(--card);
+  overflow: hidden;
+  touch-action: none;
+  cursor: grab;
+}
+
+.detail-viewer-3d:active {
+  cursor: grabbing;
+}
+
+.detail-viewer-3d canvas {
+  display: block;
+}
+
+.viewer-hint {
+  position: absolute;
+  left: 8px;
+  top: 6px;
+  font-family: 'Caveat', cursive;
+  font-size: 14px;
+  color: var(--heading);
+  background: rgba(250, 243, 224, 0.7);
+  padding: 1px 6px;
+  border-radius: 3px;
+  pointer-events: none;
+}
+
+.viewer-credit {
+  font-family: 'IM Fell English', serif;
+  font-style: italic;
+  font-size: 11px;
+  color: var(--line);
+  margin: 0;
+}
+
+/* ---- ジェスチャーモードの表示 ---- */
+
+.gesture-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+}
+
+.gesture-cursor {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 34px;
+  height: 34px;
+  margin: -17px 0 0 -17px;
+  border-radius: 50%;
+  border: 2px solid rgba(122, 56, 32, 0.55);
+  background: radial-gradient(circle at 50% 50%, rgba(200, 160, 80, 0.55), rgba(200, 160, 80, 0.05));
+  box-shadow: 0 0 0 2px rgba(250, 243, 224, 0.7);
+  transition: width 0.12s ease, height 0.12s ease, background 0.12s ease;
+  will-change: transform;
+}
+
+.gesture-cursor.is-tracking {
+  border-color: var(--tag);
+}
+
+.gesture-cursor.is-pinch {
+  width: 20px;
+  height: 20px;
+  margin: -10px 0 0 -10px;
+  background: radial-gradient(circle at 50% 50%, rgba(58, 90, 48, 0.8), rgba(58, 90, 48, 0.2));
+}
+
+.gesture-hud {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+  padding: 12px;
+  background: rgba(30, 20, 8, 0.82);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  pointer-events: auto;
+  color: #f3ead4;
+}
+
+.gesture-cam {
+  position: relative;
+  width: 132px;
+  height: 99px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid rgba(243, 234, 212, 0.35);
+  background: #000;
+  flex-shrink: 0;
+}
+
+.gesture-cam video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+}
+
+.gesture-cam-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #d94f3a;
+  box-shadow: 0 0 6px rgba(217, 79, 58, 0.9);
+}
+
+.gesture-hud-text {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 190px;
+}
+
+.gesture-status {
+  font-family: 'Caveat', cursive;
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.gesture-hints {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.gesture-hints strong {
+  color: var(--memo);
+}
+
+.gesture-exit {
+  align-self: flex-start;
+  padding: 5px 12px;
+  background: transparent;
+  color: #f3ead4;
+  border: 1px solid rgba(243, 234, 212, 0.5);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.gesture-exit:hover {
+  background: rgba(243, 234, 212, 0.15);
+}
+
+body.gesture-on {
+  cursor: none;
+}
+
+.catalog-card.gesture-hover {
+  box-shadow: 0 0 0 3px rgba(58, 90, 48, 0.55), 4px 4px 0 rgba(74, 48, 24, 0.18);
+  transform: translateY(-2px) rotate(0deg) !important;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+@media (max-width: 720px) {
+  .detail-showcase {
+    grid-template-columns: 1fr;
+  }
+
+  .gesture-hud {
+    right: 10px;
+    bottom: 10px;
+    left: 10px;
+  }
+}

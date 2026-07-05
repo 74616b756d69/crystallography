@@ -28,6 +28,14 @@ type LocalityDetail = LocalitySummary & {
   note: string;
 };
 
+type DinosaurImage = {
+  url: string;
+  credit?: string;
+  license?: string;
+  source: string;
+  sourceUrl?: string;
+};
+
 type DinosaurSummary = {
   id: string;
   nameJa: string;
@@ -38,6 +46,7 @@ type DinosaurSummary = {
   period: string;
   region: string;
   summary: string;
+  image?: DinosaurImage;
   localities: LocalitySummary[];
 };
 
@@ -73,14 +82,33 @@ type SeedDinosaur = {
   massEstimateKg: number;
 };
 
+type WikidataClaims = Record<string, Array<{ mainsnak?: { datavalue?: { value?: unknown } } }>>;
+
 type WikidataEntityResponse = {
   entities?: Record<
     string,
     {
       labels?: Record<string, { value: string }>;
       descriptions?: Record<string, { value: string }>;
+      claims?: WikidataClaims;
     }
   >;
+};
+
+type CommonsImageInfoResponse = {
+  query?: {
+    pages?: Record<
+      string,
+      {
+        imageinfo?: Array<{
+          url?: string;
+          thumburl?: string;
+          descriptionurl?: string;
+          extmetadata?: Record<string, { value?: string }>;
+        }>;
+      }
+    >;
+  };
 };
 
 type WikidataSearchResponse = {
@@ -146,6 +174,7 @@ type ExternalSnapshot = {
   wikidataId?: string;
   nameJa?: string;
   description?: string;
+  image?: DinosaurImage;
   pbdbTaxon?: PbdbTaxonRecord;
   localities: LocalityDetail[];
   references: ReferenceEntry[];
@@ -1584,6 +1613,7 @@ async function buildDinosaurDetail(seed: SeedDinosaur): Promise<DinosaurDetail> 
     region: seed.region,
     summary,
     significance,
+    image: snapshot.image,
     localities: snapshot.localities.length > 0 ? snapshot.localities : [fallbackLocality(seed)],
     references: snapshot.references.length > 0 ? snapshot.references : fallbackReferences(seed),
   };
@@ -1623,10 +1653,16 @@ async function loadExternalSnapshot(seed: SeedDinosaur): Promise<ExternalSnapsho
   const wikidata = wikidataResult.status === 'fulfilled' ? wikidataResult.value : undefined;
   const databaseReferences = buildDatabaseReferences(seed, pbdbTaxon, wikidata?.wikidataId);
 
+  let image: DinosaurImage | undefined;
+  if (wikidata?.imageFilename) {
+    image = await fetchCommonsImage(wikidata.imageFilename).catch(() => undefined);
+  }
+
   return {
     wikidataId: wikidata?.wikidataId,
     nameJa: wikidata?.nameJa,
     description: wikidata?.description,
+    image,
     pbdbTaxon,
     localities,
     references: [...literature, ...databaseReferences],
@@ -1644,6 +1680,7 @@ function toSummary(detail: DinosaurDetail): DinosaurSummary {
     period: detail.period,
     region: detail.region,
     summary: detail.summary,
+    image: detail.image,
     localities: detail.localities.map((locality) => ({
       label: locality.label,
       country: locality.country,
@@ -1868,7 +1905,7 @@ function uniqueSorted(values: string[]): string[] {
   return [...new Set(values)].sort((left, right) => left.localeCompare(right));
 }
 
-async function fetchWikidataEntity(searchName: string): Promise<{ wikidataId?: string; nameJa?: string; description?: string }> {
+async function fetchWikidataEntity(searchName: string): Promise<{ wikidataId?: string; nameJa?: string; description?: string; imageFilename?: string }> {
   const searchUrl = `https://www.wikidata.org/w/api.php?action=wbsearchentities&format=json&language=en&type=item&limit=5&search=${encodeURIComponent(searchName)}&origin=*`;
   const searchPayload = await fetchJson<WikidataSearchResponse>(searchUrl);
   const match =
@@ -1882,14 +1919,55 @@ async function fetchWikidataEntity(searchName: string): Promise<{ wikidataId?: s
   }
 
   const qid = match.id;
-  const url = `https://www.wikidata.org/w/api.php?action=wbgetentities&format=json&ids=${qid}&languages=ja|en&props=labels|descriptions&origin=*`;
+  const url = `https://www.wikidata.org/w/api.php?action=wbgetentities&format=json&ids=${qid}&languages=ja|en&props=labels|descriptions|claims&origin=*`;
   const payload = await fetchJson<WikidataEntityResponse>(url);
   const entity = payload.entities?.[qid];
   return {
     wikidataId: qid,
     nameJa: pickLocalizedValue(entity?.labels),
     description: pickLocalizedValue(entity?.descriptions) ?? match.description,
+    imageFilename: pickImageFilename(entity?.claims),
   };
+}
+
+function pickImageFilename(claims?: WikidataClaims): string | undefined {
+  const value = claims?.P18?.[0]?.mainsnak?.datavalue?.value;
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+// Wikimedia Commons のファイル名から、サムネイル URL と帰属情報（著作者 / ライセンス）を取得する。
+async function fetchCommonsImage(filename: string): Promise<DinosaurImage | undefined> {
+  const title = `File:${filename}`;
+  const url = `https://commons.wikimedia.org/w/api.php?action=query&format=json&prop=imageinfo&iiprop=url|extmetadata&iiurlwidth=800&titles=${encodeURIComponent(title)}&origin=*`;
+  const payload = await fetchJson<CommonsImageInfoResponse>(url);
+  const pages = payload.query?.pages;
+  const info = pages ? Object.values(pages)[0]?.imageinfo?.[0] : undefined;
+  const imageUrl = info?.thumburl ?? info?.url;
+  if (!imageUrl) {
+    return undefined;
+  }
+
+  const extmeta = info?.extmetadata ?? {};
+  return {
+    url: imageUrl,
+    credit: stripHtml(extmeta.Artist?.value) ?? 'Wikimedia Commons contributors',
+    license: stripHtml(extmeta.LicenseShortName?.value),
+    source: 'Wikimedia Commons',
+    sourceUrl: info?.descriptionurl ?? `https://commons.wikimedia.org/wiki/${encodeURIComponent(title)}`,
+  };
+}
+
+function stripHtml(value?: string): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const text = value
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return text.length > 0 ? text : undefined;
 }
 
 async function fetchPbdbTaxon(name: string): Promise<PbdbTaxonRecord | undefined> {
@@ -1914,6 +1992,8 @@ async function fetchJson<T>(url: string): Promise<T> {
   const response = await fetch(url, {
     headers: {
       Accept: 'application/json',
+      // Wikimedia / PBDB は説明的な User-Agent を要求する（無いと 403 になる）。
+      'User-Agent': 'DinosaurFieldNotes/1.0 (school festival exhibit; contact: akahori.t.24kdgn@gmail.com)',
     },
     signal: AbortSignal.timeout(15000),
   });

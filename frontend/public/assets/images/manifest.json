@@ -1,0 +1,12 @@
+{
+  "$schema-note": "恐竜カードに表示する画像を、手元のファイルで差し替え/追加するための台帳です。詳しい手順は docs/ADDING_ASSETS.md を参照。",
+  "images": {
+    "_example-tyrannosaurus-rex": {
+      "file": "tyrannosaurus-rex.jpg",
+      "credit": "撮影者名 / 作者名",
+      "license": "CC BY 4.0",
+      "source": "Wikimedia Commons",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:..."
+    }
+  }
+}

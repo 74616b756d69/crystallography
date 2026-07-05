@@ -6,7 +6,8 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://backend:3000',
+        // docker-compose では backend サービス、ローカル単体起動では BACKEND_ORIGIN で上書きできる。
+        target: process.env.BACKEND_ORIGIN ?? 'http://backend:3000',
         changeOrigin: true,
       },
     },

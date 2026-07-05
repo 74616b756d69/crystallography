@@ -1,0 +1,13 @@
+{
+  "$schema-note": "詳細画面の3Dビューアに表示する glTF/GLB モデルを登録する台帳です。Smithsonian Open Access(3d.si.edu) の CC0 スキャンなどを .glb にして public/assets/models/ に置き、ここに追記します。詳しい手順は docs/ADDING_ASSETS.md を参照。",
+  "models": {
+    "_example-triceratops-horridus": {
+      "file": "triceratops-horridus.glb",
+      "credit": "Smithsonian Institution",
+      "license": "CC0",
+      "source": "Smithsonian Open Access",
+      "sourceUrl": "https://3d.si.edu/",
+      "autoRotate": true
+    }
+  }
+}
