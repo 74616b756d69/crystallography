@@ -298,6 +298,30 @@ ul {
   font-weight: 700;
 }
 
+.detail-image-frame {
+  margin-top: 14px;
+  border: 1px dashed rgba(138, 96, 48, 0.45);
+  padding: 8px;
+  background: rgba(200, 180, 130, 0.08);
+  text-align: center;
+}
+
+.detail-image {
+  max-width: 100%;
+  max-height: 240px;
+  object-fit: contain;
+  display: block;
+  margin: 0 auto;
+}
+
+.detail-image-caption {
+  font-family: 'IM Fell English', serif;
+  font-style: italic;
+  font-size: 10px;
+  color: var(--line);
+  margin-top: 4px;
+}
+
 .detail-summary-block {
   margin-top: 14px;
   display: grid;
@@ -484,6 +508,20 @@ ul {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.skeleton-frame--image {
+  height: 130px;
+  padding: 0;
+  overflow: hidden;
+}
+
+.dino-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  background: rgba(200, 180, 130, 0.08);
 }
 
 .skeleton-caption {

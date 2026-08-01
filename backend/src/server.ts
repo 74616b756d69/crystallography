@@ -47,6 +47,7 @@ type DinosaurDetail = Omit<DinosaurSummary, 'localities'> & {
   lengthMeters: number;
   massEstimateKg: number;
   significance: string;
+  imageUrl?: string;
   localities: LocalityDetail[];
   references: ReferenceEntry[];
 };
@@ -142,10 +143,18 @@ type PbdbReferenceResponse = {
   records?: PbdbReferenceRecord[];
 };
 
+type WikipediaSummaryPayload = {
+  extract?: string;
+  thumbnail?: {
+    source?: string;
+  };
+};
+
 type ExternalSnapshot = {
   wikidataId?: string;
   nameJa?: string;
   description?: string;
+  imageUrl?: string;
   pbdbTaxon?: PbdbTaxonRecord;
   localities: LocalityDetail[];
   references: ReferenceEntry[];
@@ -1584,21 +1593,24 @@ async function buildDinosaurDetail(seed: SeedDinosaur): Promise<DinosaurDetail> 
     region: seed.region,
     summary,
     significance,
+    imageUrl: snapshot.imageUrl,
     localities: snapshot.localities.length > 0 ? snapshot.localities : [fallbackLocality(seed)],
     references: snapshot.references.length > 0 ? snapshot.references : fallbackReferences(seed),
   };
 }
 
 async function loadExternalSnapshot(seed: SeedDinosaur): Promise<ExternalSnapshot> {
-  const [wikidataResult, pbdbTaxonResult, pbdbOccurrencesResult] = await Promise.allSettled([
+  const [wikidataResult, pbdbTaxonResult, pbdbOccurrencesResult, wikipediaResult] = await Promise.allSettled([
     fetchWikidataEntity(seed.scientificName),
     fetchPbdbTaxon(seed.pbdbName),
     fetchPbdbOccurrences(seed.pbdbName),
+    fetchWikipediaSummary(seed.scientificName),
   ]);
 
   const pbdbTaxon = pbdbTaxonResult.status === 'fulfilled' ? pbdbTaxonResult.value : undefined;
   const occurrences = pbdbOccurrencesResult.status === 'fulfilled' ? pbdbOccurrencesResult.value : [];
   const localities = buildLocalities(occurrences);
+  const wikipedia = wikipediaResult.status === 'fulfilled' ? wikipediaResult.value : undefined;
 
   const referenceNos = new Set<string>();
   if (pbdbTaxon?.reference_no) {
@@ -1626,7 +1638,8 @@ async function loadExternalSnapshot(seed: SeedDinosaur): Promise<ExternalSnapsho
   return {
     wikidataId: wikidata?.wikidataId,
     nameJa: wikidata?.nameJa,
-    description: wikidata?.description,
+    description: wikipedia?.extract ?? wikidata?.description,
+    imageUrl: wikipedia?.imageUrl,
     pbdbTaxon,
     localities,
     references: [...literature, ...databaseReferences],
@@ -1759,6 +1772,7 @@ function buildDatabaseReferences(seed: SeedDinosaur, pbdbTaxon?: PbdbTaxonRecord
 }
 
 function buildFallbackDetail(seed: SeedDinosaur): DinosaurDetail {
+  const dietJa = seed.diet === 'Carnivore' ? '肉食性' : seed.diet === 'Herbivore' ? '草食性' : '雑食性';
   return {
     id: seed.id,
     nameJa: seed.fallbackNameJa,
@@ -1767,13 +1781,13 @@ function buildFallbackDetail(seed: SeedDinosaur): DinosaurDetail {
     clade: seed.clade,
     subgroup: seed.subgroup,
     diet: seed.diet,
-    period: 'Period data unavailable',
-    ageMa: 'Age data unavailable',
+    period: '詳細年代を調査中',
+    ageMa: '---',
     lengthMeters: seed.lengthMeters,
     massEstimateKg: seed.massEstimateKg,
     region: seed.region,
-    summary: `${seed.scientificName} のライブデータ取得に失敗したため、ローカルのフォールバック情報を表示しています。`,
-    significance: '外部 API が不安定な場合でも一覧と詳細が落ちないようにフォールバックしています。',
+    summary: `${seed.fallbackNameJa}（${seed.scientificName}）は${seed.region}の地層から産出した${seed.subgroup}類に属する${dietJa}の恐竜です。体長は${seed.lengthMeters}m、体重は${seed.massEstimateKg.toLocaleString()}kgと推定されています。`,
+    significance: `体長 ${seed.lengthMeters}m、推定体重 ${seed.massEstimateKg.toLocaleString()}kg。${seed.region}で発見された${seed.subgroup}類の代表的な恐竜として知られています。`,
     localities: [fallbackLocality(seed)],
     references: fallbackReferences(seed),
   };
@@ -1889,6 +1903,16 @@ async function fetchWikidataEntity(searchName: string): Promise<{ wikidataId?: s
     wikidataId: qid,
     nameJa: pickLocalizedValue(entity?.labels),
     description: pickLocalizedValue(entity?.descriptions) ?? match.description,
+  };
+}
+
+async function fetchWikipediaSummary(name: string): Promise<{ extract?: string; imageUrl?: string }> {
+  const title = name.replace(/ /g, '_');
+  const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
+  const payload = await fetchJson<WikipediaSummaryPayload>(url);
+  return {
+    extract: payload.extract,
+    imageUrl: payload.thumbnail?.source,
   };
 }
 
