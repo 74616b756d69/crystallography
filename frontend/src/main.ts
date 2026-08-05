@@ -1,5 +1,9 @@
 import './styles.css';
 
+import { WORLD_OUTLINE_PATHS } from './data/worldOutline';
+import { mountBackgroundScene } from './three/backgroundScene';
+import { mountGlobe, type GlobeHandle, type GlobeMarker } from './three/globeScene';
+
 type GeoPoint = {
   lat: number;
   lng: number;
@@ -103,65 +107,83 @@ const ERA_OPTIONS: EraOption[] = ['すべて', '三畳紀', 'ジュラ紀前期'
 const CONTINENT_OPTIONS: ContinentOption[] = ['すべて', '北アメリカ', '南アメリカ', 'ヨーロッパ', 'アジア', 'アフリカ', 'オーストラリア', '南極'];
 const DIET_OPTIONS: DietOption[] = ['すべて', '肉食', '草食', '雑食'];
 const CLASSIFICATION_OPTIONS: ClassificationOption[] = ['すべて', '獣脚類', '竜脚類', '鳥盤類', '剣竜類', '角竜類', '鎧竜類', '鴨嘴竜類'];
-const CARD_ROTATIONS = ['-0.4deg', '0.55deg', '-0.65deg', '0.35deg', '-0.3deg', '0.7deg'];
-const TAG_ROTATIONS = ['-0.8deg', '0.7deg', '-0.5deg', '0.6deg'];
-
 const app = document.querySelector<HTMLDivElement>('#app');
 
 if (!app) {
   throw new Error('App root was not found.');
 }
 
+const backgroundCanvas = document.createElement('canvas');
+backgroundCanvas.id = 'bg-canvas';
+backgroundCanvas.setAttribute('aria-hidden', 'true');
+document.body.prepend(backgroundCanvas);
+mountBackgroundScene(backgroundCanvas);
+
 app.innerHTML = `
-  <div class="field-notes-page">
-    <div class="page-margin-line" aria-hidden="true"></div>
-    <main class="notes-layout">
-      <header class="notes-header">
+  <div class="hud-scanlines" aria-hidden="true"></div>
+  <div class="hud-shell">
+    <header class="hud-header">
+      <div class="hud-brand">
+        <span class="hud-glyph" aria-hidden="true">◈</span>
         <div>
-          <h1>恐竜図鑑　野外記録</h1>
-          <p class="subtitle">Field Notes — Dinosaur Fossil Records</p>
+          <h1>恐竜データベース</h1>
+          <p class="hud-sub">PALAEO ARCHIVE // FOSSIL INDEX v2.4</p>
         </div>
-        <p class="header-note">文化祭　展示 / 調査ノート　第一冊</p>
-      </header>
+      </div>
+      <dl class="hud-readout">
+        <div>
+          <dt>STATUS</dt>
+          <dd id="hud-status" class="is-online">SYNC</dd>
+        </div>
+        <div>
+          <dt>RECORDS</dt>
+          <dd id="hud-records">000</dd>
+        </div>
+        <div>
+          <dt>UTC</dt>
+          <dd id="hud-clock">--:--:--</dd>
+        </div>
+      </dl>
+    </header>
 
-      <div class="wave-divider" aria-hidden="true">${renderWave(false)}</div>
-
-      <section class="search-panel" aria-label="絞り込み検索">
-        <h2>— 絞り込み検索 —</h2>
+    <main>
+      <section class="panel" aria-label="絞り込み検索">
+        <div class="panel-head">
+          <h2>QUERY CONSOLE</h2>
+          <span class="panel-tag">絞り込み検索</span>
+        </div>
         <form id="filter-form" class="search-form" autocomplete="off">
-          <div class="search-row">
-            <label class="search-block search-keyword">
-              <span>キーワード</span>
-              <div class="search-inline">
-                <input id="keyword-input" name="keyword" type="text" placeholder="恐竜の名前を入力…" autocomplete="off" />
-                <button type="submit">検　索</button>
-              </div>
-            </label>
-          </div>
+          <label class="search-block search-keyword">
+            <span>KEYWORD / キーワード</span>
+            <div class="search-inline">
+              <input id="keyword-input" name="keyword" type="text" placeholder="種名・産地を入力…" autocomplete="off" />
+              <button type="submit">SEARCH</button>
+            </div>
+          </label>
 
           <div class="filter-grid">
             <label class="search-block">
-              <span>時代</span>
+              <span>ERA / 時代</span>
               <select id="era-select" name="era"></select>
             </label>
 
             <label class="search-block">
-              <span>産地・大陸</span>
+              <span>REGION / 産地</span>
               <select id="continent-select" name="continent"></select>
             </label>
 
             <label class="search-block">
-              <span>食性</span>
+              <span>DIET / 食性</span>
               <select id="diet-select" name="diet"></select>
             </label>
 
             <label class="search-block">
-              <span>分類</span>
+              <span>CLADE / 分類</span>
               <select id="classification-select" name="classification"></select>
             </label>
 
             <label class="search-block search-range">
-              <span>大きさ（体長）</span>
+              <span>LENGTH / 体長</span>
               <input id="length-range" name="maxLength" type="range" min="0" max="40" step="1" value="40" />
               <strong id="range-value">0m 〜 40m</strong>
             </label>
@@ -169,24 +191,21 @@ app.innerHTML = `
         </form>
       </section>
 
-      <div class="wave-divider wave-divider-dashed" aria-hidden="true">${renderWave(true)}</div>
-
       <section class="catalog-section" aria-label="恐竜カード一覧">
         <div class="catalog-headline">
-          <h2 id="catalog-title">— 図鑑　全0種 —</h2>
-          <p id="result-count">検索結果 0件</p>
+          <h2 id="catalog-title">SPECIMEN INDEX / 全0種</h2>
+          <p id="result-count">MATCH 0</p>
         </div>
-        <p id="result-status" class="result-status">調査記録を読み込み中です。</p>
+        <p id="result-status" class="result-status">アーカイブに接続しています…</p>
         <section id="detail-panel" class="detail-panel" aria-live="polite"></section>
         <div id="catalog-grid" class="catalog-grid"></div>
       </section>
-
-      <footer class="notes-footer">
-        <p>記録者：___________　調査日：___________</p>
-        <p>Field Notes — Fossil Record Series</p>
-      </footer>
     </main>
-    <p class="page-number">p. 01</p>
+
+    <footer class="hud-footer">
+      <p>PALAEO ARCHIVE TERMINAL // 文化祭展示</p>
+      <p>RENDERED WITH WebGL / THREE.js</p>
+    </footer>
   </div>
 `;
 
@@ -259,10 +278,22 @@ const state: {
   },
 };
 
-function renderWave(dashed: boolean): string {
-  const dash = dashed ? ' stroke-dasharray="4,3"' : '';
-  return `<svg viewBox="0 0 620 12" preserveAspectRatio="none"><path d="M0,6 C30,1 60,11 90,6 C120,1 150,11 180,6 C210,1 240,11 270,6 C300,1 330,11 360,6 C390,1 420,11 450,6 C480,1 510,11 540,6 C570,1 600,11 620,6" stroke="#8A6030" stroke-width="${dashed ? '1' : '1.5'}" fill="none" stroke-linecap="round"${dash}/></svg>`;
+/** 詳細パネルは再描画のたびに DOM ごと差し替わるので、直前の地球儀を破棄してから張り直す。 */
+let activeGlobe: GlobeHandle | null = null;
+
+const hudStatus = document.querySelector<HTMLElement>('#hud-status');
+const hudRecords = document.querySelector<HTMLElement>('#hud-records');
+const hudClock = document.querySelector<HTMLElement>('#hud-clock');
+
+function updateClock(): void {
+  if (!hudClock) {
+    return;
+  }
+  hudClock.textContent = new Date().toISOString().slice(11, 19);
 }
+
+updateClock();
+window.setInterval(updateClock, 1000);
 
 function escapeHtml(value: string): string {
   return value
@@ -503,51 +534,31 @@ function buildMapMarker(locality: LocalityDetail): string {
   const viewBoxHeight = 52;
   const x = ((locality.coordinates.lng + 180) / 360) * viewBoxWidth;
   const y = ((90 - locality.coordinates.lat) / 180) * viewBoxHeight;
-  return `<g transform="translate(${x.toFixed(2)} ${y.toFixed(2)})"><line x1="-1.8" y1="-1.8" x2="1.8" y2="1.8"/><line x1="1.8" y1="-1.8" x2="-1.8" y2="1.8"/></g>`;
+  return `<g transform="translate(${x.toFixed(2)} ${y.toFixed(2)})"><circle r="1.6" /><line x1="-2.6" y1="0" x2="-1.1" y2="0"/><line x1="1.1" y1="0" x2="2.6" y2="0"/><line x1="0" y1="-2.6" x2="0" y2="-1.1"/><line x1="0" y1="1.1" x2="0" y2="2.6"/></g>`;
 }
+
+function buildGraticule(): string {
+  const lines: string[] = [];
+  for (let x = 10; x < 100; x += 10) {
+    lines.push(`<line x1="${x}" y1="0" x2="${x}" y2="52" />`);
+  }
+  for (let y = 6.5; y < 52; y += 6.5) {
+    lines.push(`<line x1="0" y1="${y}" x2="100" y2="${y}" />`);
+  }
+  return lines.join('');
+}
+
+const GRATICULE_MARKUP = buildGraticule();
 
 function renderMapSvg(localities: LocalityDetail[]): string {
   const markers = localities.slice(0, 6).map(buildMapMarker).join('');
+  const outlines = WORLD_OUTLINE_PATHS.map((definition) => `<path d="${definition}" />`).join('');
+
   return `
-    <svg viewBox="0 0 100 52" aria-label="産地マップ枠">
-      <g class="map-grain" fill="none">
-        <path d="M5 9 C12 8 18 8 25 9" />
-        <path d="M63 8 C71 7 80 8 88 10" />
-        <path d="M8 27 C14 26 18 26 23 27" />
-        <path d="M40 40 C48 39 57 39 66 40" />
-        <path d="M72 30 C78 29 84 30 90 32" />
-      </g>
-      <g class="map-outline map-outline-echo" fill="none">
-        <path d="M6.8 15.6 C8.6 12.8 12.5 10.8 16.5 10.7 L20.2 11.6 L22.8 13.2 L24 16 L22.1 18.3 L19.2 19.2 L17.2 22.2 L13.2 23.1 L10.3 22.2 L8.1 20.3 L7.1 17.4 Z" />
-        <path d="M17.6 11.4 C20.2 8.5 24.5 6.6 29.1 6.4 L34.1 7.3 L37.7 9.1 L39.7 12.1 L38.8 15.1 L35.9 16.3 L33.1 18.1 L30.1 18.4 L28.1 21.1 L24.3 20.2 L21.4 18.3 L19.1 15.2 Z" />
-        <path d="M28.4 21.8 L30.1 23.7 L31 27.2 L30.9 31.2 L30 36.2 L28.2 42.1 L26.2 44.7 L24.5 42.2 L23.4 36.4 L23.4 30.3 L24.4 25.5 L26.2 22.4 Z" />
-        <path d="M44.4 10.5 L47.1 9.4 L50 10.3 L50.9 12 L48.9 13.1 L46.2 13.2 L44.3 12.1 Z" />
-        <path d="M48.4 12.7 C52.4 10.4 58.3 8.5 64.2 8.6 L71.1 9.4 L76.9 11.4 L82 14.4 L85.8 18.2 L84.8 20.3 L81.1 21.2 L78.3 19.4 L74.3 19.4 L71 20.4 L68.9 22.3 L66.1 22.3 L63.2 21.1 L60.2 19.3 L57.1 18.2 L54 18.2 L51 16.2 Z" />
-        <path d="M58.2 21.4 L61 22.3 L64 25.2 L65.7 29.2 L65.8 33.2 L64 37.1 L61.9 38.8 L60.1 36.2 L58.1 31.1 L57.2 26.4 Z" />
-        <path d="M79.4 33.4 L82.1 33.4 L85.1 35.2 L86.7 38.1 L85.8 40.1 L83.2 40.9 L80.1 39.9 L78.2 37.3 Z" />
-      </g>
-      <g class="map-outline" fill="none">
-        <path d="M6 15 C8 12 12 10 16 10 L20 11 L23 13 L24 16 L22 18 L19 19 L17 22 L13 23 L10 22 L8 20 L7 17 Z" />
-        <path d="M17 11 C20 8 24 6 29 6 L34 7 L38 9 L40 12 L39 15 L36 16 L33 18 L30 18 L28 21 L24 20 L21 18 L19 15 Z" />
-        <path d="M28 21 L30 23 L31 27 L31 31 L30 36 L28 42 L26 45 L24 42 L23 36 L23 30 L24 25 L26 22 Z" />
-        <path d="M44 10 L47 9 L50 10 L51 12 L49 13 L46 13 L44 12 Z" />
-        <path d="M48 12 C52 10 58 8 64 8 L71 9 L77 11 L82 14 L86 18 L85 20 L81 21 L78 19 L74 19 L71 20 L69 22 L66 22 L63 21 L60 19 L57 18 L54 18 L51 16 Z" />
-        <path d="M58 21 L61 22 L64 25 L66 29 L66 33 L64 37 L62 39 L60 36 L58 31 L57 26 Z" />
-        <path d="M79 33 L82 33 L85 35 L87 38 L86 40 L83 41 L80 40 L78 37 Z" />
-      </g>
-      <g class="map-route" fill="none">
-        <path d="M21 15 C31 13 43 14 53 17 C64 20 71 24 80 36" />
-      </g>
-      <g class="map-notes">
-        <text x="8" y="8">N. America</text>
-        <text x="24" y="45">S. America</text>
-        <text x="46" y="7">Europe</text>
-        <text x="61" y="7">Asia</text>
-        <text x="58" y="41">Africa</text>
-        <text x="77" y="31">Australia</text>
-        <text x="60" y="15">survey route</text>
-      </g>
-      <g class="map-marker-group">${markers}</g>
+    <svg viewBox="0 0 100 52" aria-label="産地マップ">
+      <g class="map-graticule" fill="none">${GRATICULE_MARKUP}</g>
+      <g class="map-outline" fill="none">${outlines}</g>
+      <g class="map-marker-group" fill="none">${markers}</g>
     </svg>
   `;
 }
@@ -555,21 +566,22 @@ function renderMapSvg(localities: LocalityDetail[]): string {
 function renderCardImage(record: NotebookRecord): string {
   if (record.imageUrl) {
     return `
-      <div class="skeleton-frame skeleton-frame--image">
-        <img src="${escapeHtml(record.imageUrl)}" alt="${escapeHtml(record.nameEn)}" class="dino-image" loading="lazy" />
+      <div class="specimen-frame">
+        <img src="${escapeHtml(record.imageUrl)}" alt="${escapeHtml(record.nameEn)}" loading="lazy" />
+        <span class="scan-line" aria-hidden="true"></span>
       </div>
     `;
   }
+
   return `
-    <div class="skeleton-frame">
-      <span class="skeleton-caption">骨格スケッチ（側面）</span>
-      <div class="scale-bar"><i></i><strong>2m</strong></div>
+    <div class="specimen-frame">
+      <span class="specimen-caption">NO VISUAL DATA</span>
+      <span class="scan-line" aria-hidden="true"></span>
     </div>
   `;
 }
 
 function renderCard(record: NotebookRecord, index: number): string {
-  const rotation = CARD_ROTATIONS[index % CARD_ROTATIONS.length];
   const number = String(index + 1).padStart(3, '0');
   const isSelected = state.selectedRecordId === record.id;
   const locationText = record.localities[0]
@@ -577,17 +589,14 @@ function renderCard(record: NotebookRecord, index: number): string {
     : record.continentLabel;
   const rawSummary = (record.summary || record.meaning).replace(/\s+/g, ' ').trim();
   const cardText = rawSummary.length > 110 ? rawSummary.slice(0, 110) + '…' : rawSummary;
-  const tagMarkup = record.tags
-    .map(
-      (tag, tagIndex) =>
-        `<li style="transform: rotate(${TAG_ROTATIONS[tagIndex % TAG_ROTATIONS.length]});">${escapeHtml(tag)}</li>`,
-    )
-    .join('');
+  const tagMarkup = record.tags.map((tag) => `<li>${escapeHtml(tag)}</li>`).join('');
 
   return `
-    <article class="catalog-card${isSelected ? ' is-selected' : ''}" style="transform: rotate(${rotation});" data-record-id="${escapeHtml(record.id)}" role="button" tabindex="0" aria-expanded="${isSelected ? 'true' : 'false'}">
-      <div class="tape" aria-hidden="true"></div>
-      <p class="card-number">No. ${number} / ${escapeHtml(record.classificationLabel)}</p>
+    <article class="catalog-card${isSelected ? ' is-selected' : ''}" data-record-id="${escapeHtml(record.id)}" role="button" tabindex="0" aria-expanded="${isSelected ? 'true' : 'false'}">
+      <p class="card-index">
+        <span>SPEC-${number}</span>
+        <span class="card-class">${escapeHtml(record.classificationLabel)}</span>
+      </p>
       <h3>${escapeHtml(record.nameJa)}</h3>
       <p class="scientific-name">${escapeHtml(record.nameEn)}</p>
 
@@ -595,19 +604,19 @@ function renderCard(record: NotebookRecord, index: number): string {
 
       <dl class="data-grid">
         <div>
-          <dt>生息年代</dt>
+          <dt>ERA</dt>
           <dd>${escapeHtml(record.eraLabel)}</dd>
         </div>
         <div>
-          <dt>産地・発見地</dt>
+          <dt>SITE</dt>
           <dd>${escapeHtml(locationText)}</dd>
         </div>
         <div>
-          <dt>体長・体重</dt>
+          <dt>SCALE</dt>
           <dd>${escapeHtml(`${record.lengthMeters.toFixed(1)}m / ${formatMass(record.massEstimateKg)}`)}</dd>
         </div>
         <div>
-          <dt>分類</dt>
+          <dt>CLASS</dt>
           <dd>${escapeHtml(record.dietLabel)} / ${escapeHtml(record.classificationLabel)}</dd>
         </div>
       </dl>
@@ -615,7 +624,7 @@ function renderCard(record: NotebookRecord, index: number): string {
       <p class="body-text">${escapeHtml(cardText)}</p>
 
       <section class="map-frame">
-        <h4>産地マップ枠</h4>
+        <h4>DISCOVERY MAP</h4>
         ${renderMapSvg(record.localities)}
       </section>
 
@@ -670,14 +679,49 @@ function renderLocalityNotes(record: NotebookRecord): string {
   `;
 }
 
+function renderGlobeStage(record: NotebookRecord): string {
+  const count = record.localities.length;
+  return `
+    <div class="globe-stage">
+      <canvas class="globe-canvas" data-globe="true"></canvas>
+      <span class="globe-corner tl" aria-hidden="true"></span>
+      <span class="globe-corner tr" aria-hidden="true"></span>
+      <span class="globe-corner bl" aria-hidden="true"></span>
+      <span class="globe-corner br" aria-hidden="true"></span>
+      <p class="globe-label">GEO PROJECTION // ${count} SITE${count === 1 ? '' : 'S'}</p>
+      <p class="globe-hint">DRAG TO ROTATE</p>
+    </div>
+  `;
+}
+
+function mountDetailGlobe(record: NotebookRecord): void {
+  activeGlobe?.dispose();
+  activeGlobe = null;
+
+  const canvas = uiElements.detailPanel.querySelector<HTMLCanvasElement>('canvas[data-globe="true"]');
+  if (!canvas) {
+    return;
+  }
+
+  const markers: GlobeMarker[] = record.localities.map((locality) => ({
+    lat: locality.coordinates.lat,
+    lng: locality.coordinates.lng,
+    label: locality.label,
+  }));
+
+  activeGlobe = mountGlobe(canvas, markers);
+}
+
 function renderDetailPanel(): void {
   const record = state.records.find((entry) => entry.id === state.selectedRecordId);
 
   if (!record) {
+    activeGlobe?.dispose();
+    activeGlobe = null;
     uiElements.detailPanel.innerHTML = `
       <div class="detail-panel-empty">
-        <p class="detail-kicker">調査メモの詳細</p>
-        <p class="detail-empty">一覧カードの付箋から詳細を開くと、外部データ要約と文献導線をここに表示します。</p>
+        <p class="detail-kicker">DETAIL VIEWER // 詳細ビューア</p>
+        <p class="detail-empty">一覧のカードを選択すると、産地の 3D プロジェクションと文献データをここに展開します。</p>
       </div>
     `;
     return;
@@ -686,7 +730,7 @@ function renderDetailPanel(): void {
   const detailImageHtml = record.imageUrl
     ? `<div class="detail-image-frame">
         <img src="${escapeHtml(record.imageUrl)}" alt="${escapeHtml(record.nameEn)}" class="detail-image" loading="lazy" />
-        <p class="detail-image-caption">Source: Wikipedia / Wikimedia Commons</p>
+        <p class="detail-image-caption">SOURCE: Wikipedia / Wikimedia Commons</p>
       </div>`
     : '';
 
@@ -694,14 +738,17 @@ function renderDetailPanel(): void {
     <article class="detail-sheet">
       <div class="detail-sheet-head">
         <div>
-          <p class="detail-kicker">調査メモの詳細</p>
+          <p class="detail-kicker">DETAIL VIEWER // 詳細ビューア</p>
           <h3>${escapeHtml(record.nameJa)}</h3>
           <p class="detail-scientific">${escapeHtml(record.nameEn)}</p>
         </div>
-        <button type="button" class="detail-close" data-detail-close="true">一覧へ戻る</button>
+        <button type="button" class="detail-close" data-detail-close="true">CLOSE</button>
       </div>
 
-      ${detailImageHtml}
+      <div class="detail-hero${detailImageHtml ? '' : ' detail-hero--solo'}">
+        ${detailImageHtml}
+        ${renderGlobeStage(record)}
+      </div>
 
       <div class="detail-summary-block">
         <p>${escapeHtml(record.summary)}</p>
@@ -710,41 +757,46 @@ function renderDetailPanel(): void {
 
       <div class="detail-meta-grid">
         <section class="detail-box">
-          <h4>最近の研究メモ</h4>
+          <h4>RESEARCH LOG / 研究メモ</h4>
           <p>${escapeHtml(record.significance)}</p>
         </section>
         <section class="detail-box">
-          <h4>基本データ</h4>
+          <h4>CORE DATA / 基本データ</h4>
           <dl class="detail-stats">
-            <div><dt>年代</dt><dd>${escapeHtml(record.period)}</dd></div>
-            <div><dt>年代幅</dt><dd>${escapeHtml(record.ageMa)}</dd></div>
-            <div><dt>体長</dt><dd>${escapeHtml(`${record.lengthMeters.toFixed(1)}m`)}</dd></div>
-            <div><dt>体重</dt><dd>${escapeHtml(formatMass(record.massEstimateKg))}</dd></div>
+            <div><dt>PERIOD</dt><dd>${escapeHtml(record.period)}</dd></div>
+            <div><dt>AGE</dt><dd>${escapeHtml(record.ageMa)}</dd></div>
+            <div><dt>LENGTH</dt><dd>${escapeHtml(`${record.lengthMeters.toFixed(1)}m`)}</dd></div>
+            <div><dt>MASS</dt><dd>${escapeHtml(formatMass(record.massEstimateKg))}</dd></div>
           </dl>
         </section>
       </div>
 
       <div class="detail-meta-grid">
         <section class="detail-box">
-          <h4>地図表示用の産地</h4>
+          <h4>SITE INDEX / 産地</h4>
           ${renderLocalityNotes(record)}
         </section>
         <section class="detail-box">
-          <h4>文献導線</h4>
+          <h4>REFERENCES / 文献</h4>
           ${renderReferences(record)}
         </section>
       </div>
     </article>
   `;
+
+  mountDetailGlobe(record);
 }
 
 function renderCatalog(): void {
-  uiElements.catalogTitle.textContent = `— 図鑑　全${state.records.length}種 —`;
-  uiElements.resultCount.textContent = `検索結果 ${state.filteredRecords.length}件`;
+  uiElements.catalogTitle.textContent = `SPECIMEN INDEX / 全${state.records.length}種`;
+  uiElements.resultCount.textContent = `MATCH ${state.filteredRecords.length}`;
+  if (hudRecords) {
+    hudRecords.textContent = String(state.records.length).padStart(3, '0');
+  }
   renderDetailPanel();
 
   if (state.filteredRecords.length === 0) {
-    uiElements.catalogGrid.innerHTML = '<p class="empty-state">該当する調査記録は見つかりませんでした。</p>';
+    uiElements.catalogGrid.innerHTML = '<p class="empty-state">NO MATCHING RECORDS / 該当する記録がありません</p>';
     return;
   }
 
@@ -768,22 +820,67 @@ function renderControls(): void {
 
 async function bootstrap(): Promise<void> {
   try {
-    uiElements.resultStatus.textContent = '調査記録を収集中です。';
+    uiElements.resultStatus.textContent = 'アーカイブからレコードを取得中…';
     const summaries = await fetchDinosaurs();
     const details = await Promise.all(summaries.map((summary) => fetchDetail(summary.id)));
     state.records = details.map(toNotebookRecord);
     state.filteredRecords = [...state.records];
     state.selectedRecordId = null;
     uiElements.form.reset();
-    uiElements.resultStatus.textContent = '野外調査ノートを整理しました。';
+    uiElements.resultStatus.textContent = 'ARCHIVE SYNCHRONIZED / 同期完了';
+    if (hudStatus) {
+      hudStatus.textContent = 'ONLINE';
+    }
     renderControls();
     applyFilters();
     renderCatalog();
   } catch (error) {
-    uiElements.resultStatus.textContent = error instanceof Error ? error.message : '調査記録の読み込みに失敗しました。';
-    uiElements.catalogGrid.innerHTML = '<p class="empty-state">バックエンド API を起動すると図鑑カードを表示できます。</p>';
+    uiElements.resultStatus.textContent = error instanceof Error ? error.message : 'レコードの取得に失敗しました。';
+    if (hudStatus) {
+      hudStatus.textContent = 'OFFLINE';
+      hudStatus.classList.remove('is-online');
+    }
+    uiElements.catalogGrid.innerHTML =
+      '<p class="empty-state">LINK DOWN / バックエンド API を起動すると図鑑データを表示します</p>';
   }
 }
+
+/** 外部画像が落ちているときは枠を空にせず「NO VISUAL DATA」を出す。 */
+document.addEventListener(
+  'error',
+  (event) => {
+    const image = event.target;
+    if (!(image instanceof HTMLImageElement)) {
+      return;
+    }
+
+    const frame = image.closest('.specimen-frame, .detail-image-frame');
+    if (!frame) {
+      return;
+    }
+
+    const caption = document.createElement('p');
+    caption.className = 'specimen-caption';
+    caption.textContent = 'NO VISUAL DATA';
+    image.replaceWith(caption);
+  },
+  true,
+);
+
+/** カード上のカーソル位置をグローの中心として CSS に渡す。 */
+uiElements.catalogGrid.addEventListener(
+  'pointermove',
+  (event) => {
+    const card = (event.target as HTMLElement | null)?.closest<HTMLElement>('.catalog-card');
+    if (!card) {
+      return;
+    }
+    const rect = card.getBoundingClientRect();
+    card.style.setProperty('--mx', `${event.clientX - rect.left}px`);
+    card.style.setProperty('--my', `${event.clientY - rect.top}px`);
+  },
+  { passive: true },
+);
 
 uiElements.form.addEventListener('submit', (event) => {
   event.preventDefault();
