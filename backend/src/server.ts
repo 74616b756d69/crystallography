@@ -1,5 +1,8 @@
 import cors from 'cors';
 import express, { type Request, type Response } from 'express';
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 
 import { additionalSeedDinosaurs } from './additionalSeedDinosaurs.js';
 
@@ -23,7 +26,7 @@ type ImageAsset = {
   imageUrl: string;
   pageUrl: string;
   title: string;
-  source: 'wikipedia-ja';
+  source: 'wikipedia-ja' | 'wikipedia-en' | 'wikidata-commons' | 'dinoapi';
   attribution: string;
 };
 
@@ -53,9 +56,9 @@ type DinosaurSummary = {
 };
 
 type DinosaurDetail = Omit<DinosaurSummary, 'localities'> & {
-  meaning: string;
   detailedDescription: string;
-  heroImage?: ImageAsset;
+  trivia?: string;
+  gallery: ImageAsset[];
   ageMa: string;
   lengthMeters: number;
   massEstimateKg: number;
@@ -93,8 +96,28 @@ type WikidataEntityResponse = {
       labels?: Record<string, { value: string }>;
       descriptions?: Record<string, { value: string }>;
       sitelinks?: Record<string, { title: string }>;
+      claims?: {
+        P18?: Array<{
+          mainsnak?: {
+            datavalue?: {
+              value?: string;
+            };
+          };
+        }>;
+      };
     }
   >;
+};
+
+type DinoApiDinosaur = {
+  name?: string;
+  description?: string;
+  image?: string;
+  weight?: string | number;
+  length?: string | number;
+  diet?: string;
+  period?: string;
+  lived_in?: string;
 };
 
 type WikidataSearchResponse = {
@@ -156,13 +179,25 @@ type PbdbReferenceResponse = {
   records?: PbdbReferenceRecord[];
 };
 
+type WikipediaMediaListItem = {
+  title?: string;
+  type?: string;
+  showInGallery?: boolean;
+  original?: { source?: string; width?: number; height?: number };
+};
+
+type WikipediaMediaListResponse = {
+  items?: WikipediaMediaListItem[];
+};
+
 type ExternalSnapshot = {
   wikidataId?: string;
   nameJa?: string;
   description?: string;
   wikipediaSummaryJa?: string;
-  wikipediaArticleUrl?: string;
-  heroImage?: ImageAsset;
+  gallery: ImageAsset[];
+  commonsImageFile?: string;
+  dinoApiDinosaur?: DinoApiDinosaur;
   pbdbTaxon?: PbdbTaxonRecord;
   localities: LocalityDetail[];
   references: ReferenceEntry[];
@@ -214,6 +249,21 @@ type CrossrefWorkResponse = {
 
 type CrossrefMessage = NonNullable<CrossrefWorkResponse['message']>;
 type CrossrefAuthor = NonNullable<CrossrefMessage['author']>[number];
+
+type GeneratedEntry = { ecology: string; trivia: string };
+type GeneratedDescriptions = Record<string, GeneratedEntry>;
+
+function loadGeneratedDescriptions(): GeneratedDescriptions {
+  try {
+    const __dirname = dirname(fileURLToPath(import.meta.url));
+    const raw = readFileSync(join(__dirname, 'generatedDescriptions.json'), 'utf-8');
+    return JSON.parse(raw) as GeneratedDescriptions;
+  } catch {
+    return {};
+  }
+}
+
+const generatedDescriptions: GeneratedDescriptions = loadGeneratedDescriptions();
 
 const app = express();
 const port = Number(process.env.PORT ?? 3000);
@@ -639,8 +689,8 @@ const seedDinosaurs: SeedDinosaur[] = [
   },
   {
     id: 'utahraptor-ostrommaysorum',
-    scientificName: 'Utahraptor ostrommaysorum',
-    pbdbName: 'Utahraptor ostrommaysorum',
+    scientificName: 'Utahraptor ostrommaysi',
+    pbdbName: 'Utahraptor ostrommaysi',
     fallbackNameJa: 'ユタラプトル',
     meaning: 'ユタの略奪者',
     clade: 'Saurischia',
@@ -1340,19 +1390,6 @@ const seedDinosaurs: SeedDinosaur[] = [
     massEstimateKg: 1000,
   },
   {
-    id: 'miragaia-longicollum',
-    scientificName: 'Miragaia longicollum',
-    pbdbName: 'Miragaia longicollum',
-    fallbackNameJa: 'ミラガイア',
-    meaning: '長い首を持つミラガイア',
-    clade: 'Ornithischia',
-    subgroup: 'Stegosauria',
-    diet: 'Herbivore',
-    region: 'Europe',
-    lengthMeters: 6,
-    massEstimateKg: 2000,
-  },
-  {
     id: 'sauropelta-edwardsorum',
     scientificName: 'Sauropelta edwardsorum',
     pbdbName: 'Sauropelta edwardsorum',
@@ -1627,27 +1664,28 @@ async function getDinosaurDetail(seed: SeedDinosaur): Promise<DinosaurDetail> {
 
 async function buildDinosaurDetail(seed: SeedDinosaur): Promise<DinosaurDetail> {
   const snapshot = await loadExternalSnapshot(seed);
+  const generated = generatedDescriptions[seed.id];
   const pbdbTaxon = snapshot.pbdbTaxon;
-  const period = buildPeriodLabel(pbdbTaxon);
+  const pbdbPeriod = buildPeriodLabel(pbdbTaxon);
+  const period = pbdbPeriod !== 'Period data unavailable'
+    ? pbdbPeriod
+    : (snapshot.dinoApiDinosaur?.period ?? 'Period data unavailable');
   const ageMa = buildAgeLabel(pbdbTaxon);
   const occurrenceCount = pbdbTaxon?.n_occs ?? snapshot.localities.length;
-  const summary = buildSummary(seed, snapshot.description, occurrenceCount, period);
-  const detailedDescription = buildDetailedDescription(
-    seed,
-    snapshot.wikipediaSummaryJa,
-    period,
-    snapshot.localities.length,
-    snapshot.references.length,
-  );
+  const description = snapshot.description ?? snapshot.dinoApiDinosaur?.description;
+  const summary = buildSummary(seed, description, occurrenceCount, period);
+  const detailedDescription = generated?.ecology
+    ? `${generated.ecology} ${buildDescriptionSupplement(seed, period, snapshot.localities.length, snapshot.references.length)}`
+    : buildDetailedDescription(seed, snapshot.wikipediaSummaryJa, period, snapshot.localities.length, snapshot.references.length);
   const significance = buildSignificance(seed, occurrenceCount, snapshot.localities.length, snapshot.references.length);
 
   return {
     id: seed.id,
     nameJa: snapshot.nameJa ?? seed.fallbackNameJa,
     nameEn: seed.scientificName,
-    meaning: seed.meaning,
     detailedDescription,
-    heroImage: snapshot.heroImage,
+    trivia: generated?.trivia,
+    gallery: snapshot.gallery,
     clade: seed.clade,
     subgroup: seed.subgroup,
     diet: seed.diet,
@@ -1659,40 +1697,52 @@ async function buildDinosaurDetail(seed: SeedDinosaur): Promise<DinosaurDetail> 
     summary,
     significance,
     localities: snapshot.localities.length > 0 ? snapshot.localities : [fallbackLocality(seed)],
-    references: snapshot.references.length > 0 ? snapshot.references : fallbackReferences(seed),
+    references: snapshot.references,
   };
 }
 
 async function loadExternalSnapshot(seed: SeedDinosaur): Promise<ExternalSnapshot> {
-  const [wikidataResult, pbdbTaxonResult, pbdbOccurrencesResult] = await Promise.allSettled([
+  const [wikidataResult, pbdbTaxonResult, pbdbOccurrencesResult, dinoApiResult] = await Promise.allSettled([
     fetchWikidataEntity(seed.scientificName),
     fetchPbdbTaxon(seed.pbdbName),
     fetchPbdbOccurrences(seed.pbdbName),
+    fetchDinoApiRecord(seed.scientificName),
   ]);
 
   const pbdbTaxon = pbdbTaxonResult.status === 'fulfilled' ? pbdbTaxonResult.value : undefined;
   const occurrences = pbdbOccurrencesResult.status === 'fulfilled' ? pbdbOccurrencesResult.value : [];
   const localities = buildLocalities(occurrences);
+  const dinoApiDinosaur = dinoApiResult.status === 'fulfilled' ? dinoApiResult.value : undefined;
+  const wikidata = wikidataResult.status === 'fulfilled' ? wikidataResult.value : undefined;
 
   const referenceNos = new Set<string>();
-  if (pbdbTaxon?.reference_no) {
-    referenceNos.add(pbdbTaxon.reference_no);
-  }
-  occurrences.forEach((occurrence) => {
-    if (occurrence.reference_no && referenceNos.size < 5) {
-      referenceNos.add(occurrence.reference_no);
-    }
-  });
-
+  if (pbdbTaxon?.reference_no) referenceNos.add(pbdbTaxon.reference_no);
+  occurrences.forEach((occ) => { if (occ.reference_no && referenceNos.size < 5) referenceNos.add(occ.reference_no); });
   const literature = await fetchLiteratureReferenceEntries([...referenceNos]);
 
-  const wikidata = wikidataResult.status === 'fulfilled' ? wikidataResult.value : undefined;
-  const wikipediaSummary = await fetchJapaneseWikipediaSummary(seed, wikidata?.nameJa, wikidata?.jaWikipediaTitle);
+  const [wikipediaSummary, enwikiGallery] = await Promise.all([
+    fetchJapaneseWikipediaSummary(seed, wikidata?.nameJa, wikidata?.jaWikipediaTitle),
+    wikidata?.enwikiTitle
+      ? fetchEnglishWikipediaGallery(wikidata.enwikiTitle, seed).catch(() => [] as ImageAsset[])
+      : Promise.resolve([] as ImageAsset[]),
+  ]);
+
+  // 画像をまとめてギャラリーに（重複 URL を除去）
+  const galleryRaw: Array<ImageAsset | undefined> = [
+    wikipediaSummary?.heroImage,
+    ...enwikiGallery,
+    buildWikidataCommonsImage(wikidata?.commonsImageFile, seed),
+    buildDinoApiImage(dinoApiDinosaur, seed),
+  ];
+  const seenUrls = new Set<string>();
+  const gallery = galleryRaw.filter((img): img is ImageAsset => {
+    if (!img || seenUrls.has(img.imageUrl)) return false;
+    seenUrls.add(img.imageUrl);
+    return true;
+  });
+
   const databaseReferences = buildDatabaseReferenceEntries(
-    seed,
-    pbdbTaxon,
-    wikidata?.wikidataId,
-    wikipediaSummary?.articleUrl,
+    seed, pbdbTaxon, wikidata?.wikidataId, wikipediaSummary?.articleUrl,
   );
 
   return {
@@ -1700,8 +1750,9 @@ async function loadExternalSnapshot(seed: SeedDinosaur): Promise<ExternalSnapsho
     nameJa: wikidata?.nameJa,
     description: wikidata?.description,
     wikipediaSummaryJa: wikipediaSummary?.extract,
-    wikipediaArticleUrl: wikipediaSummary?.articleUrl,
-    heroImage: wikipediaSummary?.heroImage,
+    gallery,
+    commonsImageFile: wikidata?.commonsImageFile,
+    dinoApiDinosaur,
     pbdbTaxon,
     localities,
     references: dedupeReferenceEntries([...literature, ...databaseReferences]),
@@ -1950,8 +2001,8 @@ function buildFallbackDetail(seed: SeedDinosaur): DinosaurDetail {
     id: seed.id,
     nameJa: seed.fallbackNameJa,
     nameEn: seed.scientificName,
-    meaning: seed.meaning,
-    detailedDescription: `${seed.fallbackNameJa}は、${seed.meaning}として知られる恐竜です。${buildDescriptionSupplement(seed, 'Period data unavailable', 1, fallbackReferences(seed).length)} ${seed.scientificName} のライブデータ取得に失敗したため、ローカルのフォールバック情報を表示しています。`,
+    detailedDescription: `${seed.fallbackNameJa}は${buildDescriptionSupplement(seed, 'Period data unavailable', 1, fallbackReferences(seed).length)} ${seed.scientificName} のライブデータ取得に失敗したため、ローカルのフォールバック情報を表示しています。`,
+    gallery: [],
     clade: seed.clade,
     subgroup: seed.subgroup,
     diet: seed.diet,
@@ -2082,7 +2133,7 @@ function uniqueSorted(values: string[]): string[] {
 
 async function fetchWikidataEntity(
   searchName: string,
-): Promise<{ wikidataId?: string; nameJa?: string; description?: string; jaWikipediaTitle?: string }> {
+): Promise<{ wikidataId?: string; nameJa?: string; description?: string; jaWikipediaTitle?: string; enwikiTitle?: string; commonsImageFile?: string }> {
   const searchUrl = `https://www.wikidata.org/w/api.php?action=wbsearchentities&format=json&language=en&type=item&limit=5&search=${encodeURIComponent(searchName)}&origin=*`;
   const searchPayload = await fetchJson<WikidataSearchResponse>(searchUrl);
   const match =
@@ -2096,14 +2147,18 @@ async function fetchWikidataEntity(
   }
 
   const qid = match.id;
-  const url = `https://www.wikidata.org/w/api.php?action=wbgetentities&format=json&ids=${qid}&languages=ja|en&props=labels|descriptions|sitelinks&origin=*`;
+  const url = `https://www.wikidata.org/w/api.php?action=wbgetentities&format=json&ids=${qid}&languages=ja|en&props=labels|descriptions|sitelinks|claims&origin=*`;
   const payload = await fetchJson<WikidataEntityResponse>(url);
   const entity = payload.entities?.[qid];
+  const p18Value = entity?.claims?.P18?.[0]?.mainsnak?.datavalue?.value;
+  const commonsImageFile = typeof p18Value === 'string' ? p18Value : undefined;
   return {
     wikidataId: qid,
     nameJa: pickLocalizedValue(entity?.labels),
     description: pickLocalizedValue(entity?.descriptions) ?? match.description,
     jaWikipediaTitle: entity?.sitelinks?.jawiki?.title,
+    enwikiTitle: entity?.sitelinks?.enwiki?.title,
+    commonsImageFile,
   };
 }
 
@@ -2146,6 +2201,64 @@ async function fetchJapaneseWikipediaSummary(
   return undefined;
 }
 
+async function fetchEnglishWikipediaGallery(enwikiTitle: string, seed: SeedDinosaur): Promise<ImageAsset[]> {
+  const url = `https://en.wikipedia.org/api/rest_v1/page/media-list/${encodeURIComponent(enwikiTitle)}`;
+  const payload = await fetchJson<WikipediaMediaListResponse>(url);
+  const pageUrl = `https://en.wikipedia.org/wiki/${encodeURIComponent(enwikiTitle)}`;
+  return (payload.items ?? [])
+    .filter(
+      (item) =>
+        item.type === 'image' &&
+        item.showInGallery === true &&
+        item.original?.source &&
+        /\.(jpe?g|png|webp)$/i.test(item.original.source),
+    )
+    .slice(0, 5)
+    .map((item) => ({
+      imageUrl: item.original!.source!,
+      pageUrl,
+      title: (item.title ?? seed.fallbackNameJa).replace(/^File:/, ''),
+      source: 'wikipedia-en' as const,
+      attribution: 'English Wikipedia / Wikimedia Commons',
+    }));
+}
+
+async function fetchDinoApiRecord(scientificName: string): Promise<DinoApiDinosaur | undefined> {
+  const genus = scientificName.split(' ')[0];
+  const url = `https://dinoapi.brunosouzadev.com/api/dinosaurs?name=${encodeURIComponent(genus)}`;
+  const payload = await fetchJson<DinoApiDinosaur[] | { dinosaurs?: DinoApiDinosaur[] }>(url);
+  const records = Array.isArray(payload) ? payload : (payload.dinosaurs ?? []);
+  const lowerGenus = genus.toLowerCase();
+  return records.find((r) => r.name?.toLowerCase().startsWith(lowerGenus)) ?? records[0];
+}
+
+function buildWikidataCommonsImage(commonsImageFile: string | undefined, seed: SeedDinosaur): ImageAsset | undefined {
+  if (!commonsImageFile) {
+    return undefined;
+  }
+  const encoded = encodeURIComponent(commonsImageFile.replace(/ /g, '_'));
+  return {
+    imageUrl: `https://commons.wikimedia.org/wiki/Special:FilePath/${encoded}`,
+    pageUrl: `https://commons.wikimedia.org/wiki/File:${encoded}`,
+    title: seed.fallbackNameJa,
+    source: 'wikidata-commons',
+    attribution: 'Wikimedia Commons (Wikidata P18)',
+  };
+}
+
+function buildDinoApiImage(record: DinoApiDinosaur | undefined, seed: SeedDinosaur): ImageAsset | undefined {
+  if (!record?.image) {
+    return undefined;
+  }
+  return {
+    imageUrl: record.image,
+    pageUrl: 'https://dinoapi.brunosouzadev.com',
+    title: record.name ?? seed.fallbackNameJa,
+    source: 'dinoapi',
+    attribution: 'DinoAPI (brunosouzadev.com)',
+  };
+}
+
 async function fetchPbdbTaxon(name: string): Promise<PbdbTaxonRecord | undefined> {
   const url = `https://paleobiodb.org/data1.2/taxa/single.json?name=${encodeURIComponent(name)}&show=attr,app&vocab=pbdb`;
   const payload = await fetchJson<PbdbTaxonResponse>(url);
@@ -2170,10 +2283,16 @@ async function fetchCrossrefWork(doi: string): Promise<CrossrefWorkResponse['mes
   return payload.message;
 }
 
+// Wikimedia (Wikipedia / Wikidata) は User-Agent 無しのリクエストを 403 で拒否する。
+// 連絡先を含む説明的な UA を必ず送る。参考: https://meta.wikimedia.org/wiki/User-Agent_policy
+const EXTERNAL_USER_AGENT =
+  'DinoZukan/1.0 (school festival exhibit; https://github.com/; contact@example.com)';
+
 async function fetchJson<T>(url: string): Promise<T> {
   const response = await fetch(url, {
     headers: {
       Accept: 'application/json',
+      'User-Agent': EXTERNAL_USER_AGENT,
     },
     signal: AbortSignal.timeout(15000),
   });

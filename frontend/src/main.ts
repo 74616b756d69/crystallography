@@ -13,6 +13,15 @@ type LocalitySummary = {
   coordinates: GeoPoint;
 };
 
+
+type ImageAsset = {
+  imageUrl: string;
+  pageUrl: string;
+  title: string;
+  source: 'wikipedia-ja' | 'wikipedia-en' | 'wikidata-commons' | 'dinoapi';
+  attribution: string;
+};
+
 type ReferenceEntry = {
   title: string;
   authors: string;
@@ -22,14 +31,6 @@ type ReferenceEntry = {
   url: string;
   source: 'pbdb' | 'wikidata' | 'wikipedia-ja';
   kind: 'original-description' | 'redescription' | 'review' | 'database';
-};
-
-type ImageAsset = {
-  imageUrl: string;
-  pageUrl: string;
-  title: string;
-  source: 'wikipedia-ja';
-  attribution: string;
 };
 
 type DinosaurSummary = {
@@ -50,9 +51,9 @@ type LocalityDetail = LocalitySummary & {
 };
 
 type DinosaurDetail = Omit<DinosaurSummary, 'localities'> & {
-  meaning: string;
   detailedDescription: string;
-  heroImage?: ImageAsset;
+  trivia?: string;
+  gallery: ImageAsset[];
   ageMa: string;
   lengthMeters: number;
   massEstimateKg: number;
@@ -123,6 +124,149 @@ if (!app) {
   throw new Error('App root was not found.');
 }
 
+// ===================== SPLASH SCREEN =====================
+
+function renderFootprintSvg(): string {
+  return `<svg width="22" height="28" viewBox="0 0 22 28" aria-hidden="true">
+    <path d="M11 28 L9.5 19 L9 13 L10 3 L11 1 L12 3 L13 13 L12.5 19 Z" fill="currentColor"/>
+    <path d="M9.5 22 L4.5 17.5 L2 12 L3 10.5 L4.5 11.5 L7 16.5 L9 21 Z" fill="currentColor" opacity="0.85"/>
+    <path d="M12.5 22 L17.5 17.5 L20 12 L19 10.5 L17.5 11.5 L15 16.5 L13 21 Z" fill="currentColor" opacity="0.85"/>
+  </svg>`;
+}
+
+function renderSplashWave(dashed: boolean): string {
+  const dash = dashed ? ' stroke-dasharray="4,3"' : '';
+  return `<svg viewBox="0 0 620 12" preserveAspectRatio="none"><path d="M0,6 C30,1 60,11 90,6 C120,1 150,11 180,6 C210,1 240,11 270,6 C300,1 330,11 360,6 C390,1 420,11 450,6 C480,1 510,11 540,6 C570,1 600,11 620,6" stroke="#8A6030" stroke-width="${dashed ? '1' : '1.5'}" fill="none" stroke-linecap="round"${dash}/></svg>`;
+}
+
+const CLASSIFICATION_SILHOUETTES: Record<ClassificationOption, string> = {
+  すべて: '',
+  獣脚類: `<svg viewBox="0 0 280 140" fill="none" aria-hidden="true">
+    <path d="M172 80 C197 72 218 62 233 52 C239 47 237 44 232 49 C226 55 206 66 175 76" fill="currentColor" opacity="0.8"/>
+    <ellipse cx="115" cy="88" rx="60" ry="35" fill="currentColor"/>
+    <path d="M85 63 C79 46 81 33 90 22" stroke="currentColor" stroke-width="15" stroke-linecap="round" fill="none"/>
+    <path d="M82 24 C86 14 97 9 109 12 C120 9 132 16 138 25 C142 33 138 40 129 42 C118 44 105 44 94 38 C88 34 81 30 82 24Z" fill="currentColor"/>
+    <circle cx="110" cy="23" r="3.5" fill="var(--paper,#F2E8D0)"/>
+    <path d="M94 96 C89 103 85 110 83 115" stroke="currentColor" stroke-width="6" stroke-linecap="round" fill="none"/>
+    <path d="M97 122 L91 105 C89 99 90 93 93 93" stroke="currentColor" stroke-width="11" stroke-linecap="round" fill="none"/>
+    <path d="M91 122 L85 131 M91 122 L93 133 M91 122 L99 129" stroke="currentColor" stroke-width="4" stroke-linecap="round" fill="none"/>
+    <path d="M133 124 L127 107 C125 101 126 95 129 95" stroke="currentColor" stroke-width="11" stroke-linecap="round" fill="none"/>
+    <path d="M127 124 L121 133 M127 124 L129 135 M127 124 L135 131" stroke="currentColor" stroke-width="4" stroke-linecap="round" fill="none"/>
+  </svg>`,
+  竜脚類: `<svg viewBox="0 0 280 140" fill="none" aria-hidden="true">
+    <path d="M205 88 C228 83 250 78 268 73" stroke="currentColor" stroke-width="15" stroke-linecap="round" fill="none"/>
+    <ellipse cx="148" cy="90" rx="62" ry="32" fill="currentColor"/>
+    <path d="M100 68 C84 47 68 27 52 12" stroke="currentColor" stroke-width="20" stroke-linecap="round" fill="none"/>
+    <ellipse cx="43" cy="9" rx="20" ry="10" transform="rotate(-20 43 9)" fill="currentColor"/>
+    <path d="M106 116 L104 135" stroke="currentColor" stroke-width="13" stroke-linecap="round" fill="none"/>
+    <path d="M128 118 L126 137" stroke="currentColor" stroke-width="13" stroke-linecap="round" fill="none"/>
+    <path d="M162 118 L160 137" stroke="currentColor" stroke-width="13" stroke-linecap="round" fill="none"/>
+    <path d="M182 116 L180 135" stroke="currentColor" stroke-width="13" stroke-linecap="round" fill="none"/>
+  </svg>`,
+  鳥盤類: `<svg viewBox="0 0 280 140" fill="none" aria-hidden="true">
+    <path d="M168 84 C190 77 210 68 224 58 C230 53 228 50 223 55 C217 61 197 72 170 80" fill="currentColor" opacity="0.8"/>
+    <ellipse cx="112" cy="90" rx="58" ry="33" fill="currentColor"/>
+    <path d="M82 66 C76 50 77 36 84 24" stroke="currentColor" stroke-width="15" stroke-linecap="round" fill="none"/>
+    <path d="M74 26 C78 15 90 10 103 13 C116 10 127 17 131 27 C127 37 113 42 100 40 C88 42 76 36 74 26Z" fill="currentColor"/>
+    <path d="M88 98 C83 105 79 112 77 116" stroke="currentColor" stroke-width="7" stroke-linecap="round" fill="none"/>
+    <path d="M96 122 L90 105" stroke="currentColor" stroke-width="12" stroke-linecap="round" fill="none"/>
+    <path d="M90 122 L84 130 M90 122 L92 131 M90 122 L98 128" stroke="currentColor" stroke-width="4" stroke-linecap="round" fill="none"/>
+    <path d="M128 124 L122 106" stroke="currentColor" stroke-width="12" stroke-linecap="round" fill="none"/>
+    <path d="M122 124 L116 132 M122 124 L124 133 M122 124 L130 130" stroke="currentColor" stroke-width="4" stroke-linecap="round" fill="none"/>
+  </svg>`,
+  剣竜類: `<svg viewBox="0 0 280 140" fill="none" aria-hidden="true">
+    <path d="M85 92 L77 64 L87 73Z" fill="currentColor" opacity="0.85"/>
+    <path d="M106 85 L96 50 L110 63Z" fill="currentColor" opacity="0.85"/>
+    <path d="M128 80 L118 40 L134 57Z" fill="currentColor" opacity="0.85"/>
+    <path d="M150 82 L140 44 L156 60Z" fill="currentColor" opacity="0.85"/>
+    <path d="M170 86 L164 55 L176 68Z" fill="currentColor" opacity="0.85"/>
+    <path d="M188 92 L184 68 L194 78Z" fill="currentColor" opacity="0.85"/>
+    <ellipse cx="148" cy="100" rx="80" ry="28" fill="currentColor"/>
+    <path d="M64 106 C58 98 55 90 60 84 C66 78 76 78 82 84 C88 90 88 98 82 104 C78 110 70 110 64 106Z" fill="currentColor"/>
+    <path d="M225 94 L244 77 M228 98 L249 87 M228 102 L249 102 M225 106 L243 118" stroke="currentColor" stroke-width="5" stroke-linecap="round" fill="none"/>
+    <path d="M90 122 L88 138" stroke="currentColor" stroke-width="11" stroke-linecap="round" fill="none"/>
+    <path d="M112 124 L110 140" stroke="currentColor" stroke-width="11" stroke-linecap="round" fill="none"/>
+    <path d="M175 124 L173 140" stroke="currentColor" stroke-width="12" stroke-linecap="round" fill="none"/>
+    <path d="M197 122 L195 138" stroke="currentColor" stroke-width="12" stroke-linecap="round" fill="none"/>
+  </svg>`,
+  角竜類: `<svg viewBox="0 0 280 140" fill="none" aria-hidden="true">
+    <path d="M78 60 C68 34 63 17 83 10 C103 4 123 12 128 37 C123 43 107 52 93 58Z" fill="currentColor" opacity="0.75"/>
+    <path d="M98 44 L83 14 L91 42Z" fill="currentColor"/>
+    <path d="M115 40 L106 14 L118 38Z" fill="currentColor"/>
+    <ellipse cx="176" cy="93" rx="70" ry="34" fill="currentColor"/>
+    <path d="M112 70 C122 62 137 68 150 75" stroke="currentColor" stroke-width="22" stroke-linecap="round" fill="none"/>
+    <path d="M242 90 C260 87 270 82 274 77" stroke="currentColor" stroke-width="12" stroke-linecap="round" fill="none"/>
+    <path d="M130 120 L128 137" stroke="currentColor" stroke-width="11" stroke-linecap="round" fill="none"/>
+    <path d="M150 122 L148 139" stroke="currentColor" stroke-width="11" stroke-linecap="round" fill="none"/>
+    <path d="M196 122 L194 139" stroke="currentColor" stroke-width="12" stroke-linecap="round" fill="none"/>
+    <path d="M216 120 L214 137" stroke="currentColor" stroke-width="12" stroke-linecap="round" fill="none"/>
+  </svg>`,
+  鎧竜類: `<svg viewBox="0 0 280 140" fill="none" aria-hidden="true">
+    <path d="M60 102 C62 84 75 74 95 70 C115 66 135 64 155 66 C175 64 195 70 210 76 C225 80 232 90 232 100" fill="currentColor"/>
+    <ellipse cx="145" cy="102" rx="90" ry="27" fill="currentColor"/>
+    <path d="M78 74 L72 60 M98 68 L94 54 M118 65 L114 51 M138 63 L136 49 M158 64 L156 50 M178 67 L176 53 M198 73 L196 59" stroke="currentColor" stroke-width="5" stroke-linecap="round" fill="none"/>
+    <ellipse cx="60" cy="105" rx="26" ry="14" fill="currentColor"/>
+    <path d="M230 100 C250 96 267 94 273 99 C276 103 273 107 265 109 C256 110 242 107 230 102" fill="currentColor"/>
+    <path d="M88 124 L86 137" stroke="currentColor" stroke-width="10" stroke-linecap="round" fill="none"/>
+    <path d="M116 126 L114 139" stroke="currentColor" stroke-width="10" stroke-linecap="round" fill="none"/>
+    <path d="M168 126 L166 139" stroke="currentColor" stroke-width="10" stroke-linecap="round" fill="none"/>
+    <path d="M195 124 L193 137" stroke="currentColor" stroke-width="10" stroke-linecap="round" fill="none"/>
+  </svg>`,
+  鴨嘴竜類: `<svg viewBox="0 0 280 140" fill="none" aria-hidden="true">
+    <path d="M175 82 C198 74 218 65 232 55 C238 50 236 47 231 52 C225 58 205 69 177 77" fill="currentColor" opacity="0.8"/>
+    <ellipse cx="118" cy="90" rx="60" ry="34" fill="currentColor"/>
+    <path d="M86 60 C80 46 81 32 88 20 C98 6 113 4 122 17 C114 24 102 38 93 56" fill="currentColor"/>
+    <path d="M86 65 C80 49 81 35 88 25" stroke="currentColor" stroke-width="14" stroke-linecap="round" fill="none"/>
+    <path d="M76 27 C80 17 91 11 104 14 C117 11 129 17 135 27 C133 35 118 40 105 38 C93 40 79 35 76 27Z" fill="currentColor"/>
+    <path d="M76 30 C67 28 59 30 55 34 C57 39 65 39 76 36Z" fill="currentColor"/>
+    <path d="M94 98 C89 106 85 113 83 117" stroke="currentColor" stroke-width="6" stroke-linecap="round" fill="none"/>
+    <path d="M97 123 L91 106" stroke="currentColor" stroke-width="12" stroke-linecap="round" fill="none"/>
+    <path d="M91 123 L85 131 M91 123 L93 132 M91 123 L99 129" stroke="currentColor" stroke-width="4" stroke-linecap="round" fill="none"/>
+    <path d="M132 125 L126 107" stroke="currentColor" stroke-width="12" stroke-linecap="round" fill="none"/>
+    <path d="M126 125 L120 133 M126 125 L128 134 M126 125 L134 131" stroke="currentColor" stroke-width="4" stroke-linecap="round" fill="none"/>
+  </svg>`,
+};
+
+function renderClassificationSilhouette(classificationLabel: ClassificationOption): string {
+  const svg = CLASSIFICATION_SILHOUETTES[classificationLabel] ?? CLASSIFICATION_SILHOUETTES['獣脚類'];
+  return `<div class="dino-silhouette">${svg}</div>`;
+}
+
+function mountSplashScreen(): void {
+  const splash = document.createElement('div');
+  splash.id = 'splash-screen';
+  splash.className = 'splash-screen';
+  splash.setAttribute('role', 'dialog');
+  splash.setAttribute('aria-modal', 'true');
+  splash.setAttribute('aria-label', '恐竜図鑑 入口画面');
+
+  splash.innerHTML = `
+    <div class="splash-margin-line" aria-hidden="true"></div>
+    <div class="splash-wave-top" aria-hidden="true">${renderSplashWave(false)}</div>
+    <div class="splash-wave-bottom" aria-hidden="true">${renderSplashWave(true)}</div>
+    <div class="splash-content">
+      <h1 class="splash-title">恐竜図鑑</h1>
+      <p class="splash-sub">野外調査記録 — Field Notes Series I</p>
+      <p class="splash-meta">文化祭　展示　2026</p>
+      <button class="splash-btn" id="splash-enter-btn" type="button">図鑑をひらく</button>
+    </div>
+  `;
+
+  document.body.prepend(splash);
+
+  const enterBtn = document.getElementById('splash-enter-btn');
+  enterBtn?.addEventListener('click', () => {
+    splash.classList.add('is-leaving');
+    splash.addEventListener('animationend', () => {
+      splash.remove();
+    }, { once: true });
+  });
+}
+
+mountSplashScreen();
+
+// ===================== MAIN APP =====================
+
 app.innerHTML = `
   <div class="field-notes-page">
     <div class="page-margin-line" aria-hidden="true"></div>
@@ -188,6 +332,9 @@ app.innerHTML = `
             <h2 id="catalog-title">— 図鑑　全0種 —</h2>
             <p id="result-count">検索結果 0件</p>
           </div>
+          <div class="random-btn-wrap">
+            <button type="button" class="random-btn" id="random-btn">ランダムで見る</button>
+          </div>
           <p id="result-status" class="result-status">調査記録を読み込み中です。</p>
           <div id="catalog-grid" class="catalog-grid"></div>
         </section>
@@ -219,6 +366,7 @@ const ui = {
   resultCount: document.querySelector<HTMLElement>('#result-count'),
   resultStatus: document.querySelector<HTMLElement>('#result-status'),
   catalogGrid: document.querySelector<HTMLElement>('#catalog-grid'),
+  randomBtn: document.querySelector<HTMLButtonElement>('#random-btn'),
 };
 
 if (
@@ -235,7 +383,8 @@ if (
   !ui.catalogTitle ||
   !ui.resultCount ||
   !ui.resultStatus ||
-  !ui.catalogGrid
+  !ui.catalogGrid ||
+  !ui.randomBtn
 ) {
   throw new Error('Required UI elements are missing.');
 }
@@ -255,6 +404,7 @@ const uiElements = {
   resultCount: ui.resultCount,
   resultStatus: ui.resultStatus,
   catalogGrid: ui.catalogGrid,
+  randomBtn: ui.randomBtn,
 };
 
 const state: {
@@ -410,7 +560,7 @@ function mapClassification(record: DinosaurDetail): ClassificationOption {
 }
 
 function buildNoteText(record: DinosaurDetail): string {
-  const noteSource = record.significance || record.meaning || record.summary;
+  const noteSource = record.significance || record.summary;
   const trimmed = noteSource.replace(/\s+/g, ' ').trim();
   return `最近の研究メモ: ${trimmed}`;
 }
@@ -485,7 +635,6 @@ function matchesKeyword(record: NotebookRecord, keyword: string): boolean {
   const haystack = [
     record.nameJa,
     record.nameEn,
-    record.meaning,
     record.summary,
     record.significance,
     record.subgroup,
@@ -593,7 +742,7 @@ function renderCard(record: NotebookRecord, index: number): string {
   const locationText = record.localities[0]
     ? `${record.localities[0].country} / ${record.localities[0].formation}`
     : record.continentLabel;
-  const cardText = record.meaning.replace(/\s+/g, ' ').trim() || `${record.nameJa} の基本記録`;
+  const cardText = record.summary.replace(/\s+/g, ' ').trim().slice(0, 80) || `${record.nameJa} の基本記録`;
   const tagMarkup = record.tags
     .map(
       (tag, tagIndex) =>
@@ -602,16 +751,18 @@ function renderCard(record: NotebookRecord, index: number): string {
     .join('');
 
   return `
-    <article class="catalog-card${isSelected ? ' is-selected' : ''}" style="transform: rotate(${rotation});" data-record-id="${escapeHtml(record.id)}" role="button" tabindex="0" aria-expanded="${isSelected ? 'true' : 'false'}">
+    <article class="catalog-card${isSelected ? ' is-selected' : ''}" style="--card-rotation: ${rotation};" data-record-id="${escapeHtml(record.id)}" role="button" tabindex="0" aria-expanded="${isSelected ? 'true' : 'false'}">
       <div class="tape" aria-hidden="true"></div>
       <p class="card-number">No. ${number} / ${escapeHtml(record.classificationLabel)}</p>
       <h3>${escapeHtml(record.nameJa)}</h3>
       <p class="scientific-name">${escapeHtml(record.nameEn)}</p>
 
-      <div class="skeleton-frame">
-        <span class="skeleton-caption">骨格スケッチ（側面）</span>
-        <div class="scale-bar"><i></i><strong>2m</strong></div>
-      </div>
+      ${record.gallery[0]
+        ? `<div class="card-thumbnail">
+             <img src="${escapeHtml(record.gallery[0].imageUrl)}" alt="${escapeHtml(`${record.nameJa} の画像`)}" loading="lazy" />
+           </div>`
+        : renderClassificationSilhouette(record.classificationLabel)
+      }
 
       <dl class="data-grid">
         <div>
@@ -644,39 +795,6 @@ function renderCard(record: NotebookRecord, index: number): string {
   `;
 }
 
-function renderReferences(record: NotebookRecord): string {
-  if (record.references.length === 0) {
-    return '<p class="detail-empty">文献導線はまだありません。</p>';
-  }
-
-  return `
-    <ul class="detail-reference-list">
-      ${record.references
-        .map(
-          (reference) => `
-            <li>
-              <span class="reference-source">${escapeHtml(formatReferenceSource(reference.source))}</span>
-              <a href="${escapeHtml(reference.url)}" target="_blank" rel="noreferrer">
-                ${escapeHtml(reference.title)}
-              </a>
-              <p>${escapeHtml(`${reference.authors} / ${reference.journal} / ${reference.year}`)}</p>
-            </li>
-          `,
-        )
-        .join('')}
-    </ul>
-  `;
-}
-
-function formatReferenceSource(source: ReferenceEntry['source']): string {
-  if (source === 'pbdb') {
-    return 'PaleoBioDB';
-  }
-  if (source === 'wikidata') {
-    return 'Wikidata';
-  }
-  return 'Wikipedia JA';
-}
 
 function renderLocalityNotes(record: NotebookRecord): string {
   if (record.localities.length === 0) {
@@ -717,21 +835,32 @@ function renderDetailMap(record: NotebookRecord): string {
   `;
 }
 
-function renderDetailHeroImage(record: NotebookRecord): string {
-  if (!record.heroImage) {
+function renderDetailGallery(record: NotebookRecord): string {
+  if (record.gallery.length === 0) {
     return '<p class="detail-empty">表示できる写真はまだ取得できていません。</p>';
   }
 
+  const [hero, ...rest] = record.gallery;
+  const thumbs = rest
+    .map(
+      (img) => `
+        <a href="${escapeHtml(img.pageUrl)}" target="_blank" rel="noreferrer" class="gallery-thumb">
+          <img src="${escapeHtml(img.imageUrl)}" alt="${escapeHtml(`${record.nameJa} の関連画像`)}" loading="lazy" />
+        </a>`,
+    )
+    .join('');
+
   return `
-    <figure class="detail-hero-media">
-      <img src="${escapeHtml(record.heroImage.imageUrl)}" alt="${escapeHtml(`${record.nameJa} の関連画像`)}" loading="eager" />
-      <figcaption>
-        <a href="${escapeHtml(record.heroImage.pageUrl)}" target="_blank" rel="noreferrer">
-          ${escapeHtml(record.heroImage.title)}
-        </a>
-        <span>${escapeHtml(record.heroImage.attribution)}</span>
-      </figcaption>
-    </figure>
+    <div class="detail-gallery">
+      <figure class="gallery-hero">
+        <img src="${escapeHtml(hero.imageUrl)}" alt="${escapeHtml(`${record.nameJa} の関連画像`)}" loading="eager" />
+        <figcaption>
+          <a href="${escapeHtml(hero.pageUrl)}" target="_blank" rel="noreferrer">${escapeHtml(hero.title)}</a>
+          <span>${escapeHtml(hero.attribution)}</span>
+        </figcaption>
+      </figure>
+      ${thumbs ? `<div class="gallery-thumbs">${thumbs}</div>` : ''}
+    </div>
   `;
 }
 
@@ -761,8 +890,9 @@ function renderDetailPanel(): void {
       </div>
 
       <div class="detail-summary-block">
-        ${renderDetailHeroImage(record)}
+        ${renderDetailGallery(record)}
         <p>${escapeHtml(record.detailedDescription)}</p>
+        ${record.trivia ? `<aside class="detail-trivia">💡 ${escapeHtml(record.trivia)}</aside>` : ''}
         <aside class="detail-research-note">${escapeHtml(record.noteText)}</aside>
       </div>
 
@@ -784,16 +914,71 @@ function renderDetailPanel(): void {
 
       <div class="detail-meta-grid">
         <section class="detail-box">
+          <h4>体型シルエット</h4>
+          <div class="detail-silhouette-wrap">
+            ${renderClassificationSilhouette(record.classificationLabel)}
+            <p class="detail-silhouette-label">${escapeHtml(record.classificationLabel)} / ${escapeHtml(record.nameEn)}</p>
+          </div>
+        </section>
+        <section class="detail-box">
           <h4>地図表示用の産地</h4>
           ${renderDetailMap(record)}
           ${renderLocalityNotes(record)}
         </section>
-        <section class="detail-box">
-          <h4>文献導線</h4>
-          ${renderReferences(record)}
-        </section>
       </div>
+
+      <section class="detail-box detail-references">
+        <h4>参考文献・出典</h4>
+        ${renderReferences(record)}
+      </section>
     </article>
+  `;
+}
+
+const REFERENCE_KIND_LABEL: Record<ReferenceEntry['kind'], string> = {
+  'original-description': '原記載',
+  redescription: '再記載',
+  review: '総説・研究',
+  database: 'データベース',
+};
+
+function renderReferences(record: NotebookRecord): string {
+  if (record.references.length === 0) {
+    return '<p class="detail-empty">参考文献はまだ取得できていません。</p>';
+  }
+
+  const items = record.references
+    .map((ref) => {
+      const kindLabel = REFERENCE_KIND_LABEL[ref.kind] ?? '';
+      const meta = [ref.authors, ref.journal, ref.year ? String(ref.year) : '']
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .join(' / ');
+      const doi = ref.doi ? ` <span class="reference-doi">doi:${escapeHtml(ref.doi)}</span>` : '';
+      return `
+        <li class="reference-item reference-kind-${escapeHtml(ref.kind)}">
+          ${kindLabel ? `<span class="reference-tag">${escapeHtml(kindLabel)}</span>` : ''}
+          <a href="${escapeHtml(ref.url)}" target="_blank" rel="noreferrer">${escapeHtml(ref.title)}</a>
+          <span class="reference-meta">${escapeHtml(meta)}${doi}</span>
+        </li>`;
+    })
+    .join('');
+
+  return `<ol class="reference-list">${items}</ol>`;
+}
+
+function renderLoadingIndicator(): void {
+  const fp = renderFootprintSvg();
+  uiElements.resultStatus.textContent = '';
+  uiElements.catalogGrid.innerHTML = `
+    <div class="loading-indicator" role="status" aria-label="読み込み中">
+      <div class="loading-footprints" aria-hidden="true">
+        <span class="loading-footprint" style="color: var(--heading)">${fp}</span>
+        <span class="loading-footprint" style="color: var(--heading)">${fp}</span>
+        <span class="loading-footprint" style="color: var(--heading)">${fp}</span>
+      </div>
+      <p class="loading-text">調査記録を収集中です…</p>
+    </div>
   `;
 }
 
@@ -833,6 +1018,17 @@ function closeDetail(historyMode: 'push' | 'replace' = 'push'): void {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
+function openRandomRecord(): void {
+  if (state.filteredRecords.length === 0) {
+    return;
+  }
+  const idx = Math.floor(Math.random() * state.filteredRecords.length);
+  const record = state.filteredRecords[idx];
+  if (record) {
+    openDetail(record.id);
+  }
+}
+
 function syncRouteFromUrl(): void {
   const recordId = getSelectedRecordIdFromUrl();
   state.selectedRecordId = recordId && state.records.some((record) => record.id === recordId) ? recordId : null;
@@ -860,18 +1056,20 @@ function renderControls(): void {
 }
 
 async function bootstrap(): Promise<void> {
+  renderLoadingIndicator();
+
   try {
-    uiElements.resultStatus.textContent = '調査記録を収集中です。';
     const summaries = await fetchDinosaurs();
     const details = await Promise.all(summaries.map((summary) => fetchDetail(summary.id)));
     state.records = details.map(toNotebookRecord);
     state.filteredRecords = [...state.records];
     uiElements.form.reset();
-    uiElements.resultStatus.textContent = '野外調査ノートを整理しました。';
+    uiElements.resultStatus.textContent = '';
     renderControls();
     applyFilters();
     syncRouteFromUrl();
   } catch (error) {
+    uiElements.catalogGrid.innerHTML = '';
     uiElements.resultStatus.textContent = error instanceof Error ? error.message : '調査記録の読み込みに失敗しました。';
     uiElements.catalogGrid.innerHTML = '<p class="empty-state">バックエンド API を起動すると図鑑カードを表示できます。</p>';
   }
@@ -952,6 +1150,10 @@ uiElements.detailView.addEventListener('click', (event) => {
   }
 
   closeDetail();
+});
+
+uiElements.randomBtn.addEventListener('click', () => {
+  openRandomRecord();
 });
 
 window.addEventListener('popstate', () => {
