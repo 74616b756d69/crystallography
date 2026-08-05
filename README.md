@@ -31,6 +31,25 @@ backend のヘルスチェックは http://localhost:3000/api/health です。
 - CIF の取得 URL は https://www.crystallography.net/cod/<COD_ID>.cif です
 - まずは外部の無料 API を利用し、DynamoDB などの内部キャッシュは後段で追加する想定です
 
+### 恐竜図鑑のデータ取得
+
+- 出典は日本語版/英語版 Wikipedia、Wikimedia Commons、Wikidata、PaleoBioDB
+- 起動時に `backend/data/dinosaur-cache.json` を読み込み、バックグラウンドで再取得する
+  （会場のネットワークが落ちても前回取得できた内容を表示できる）
+- 取得状況は `GET /api/status`、手動再取得は `POST /api/refresh`
+- 図鑑データの一括取得は `GET /api/dinosaurs/all`
+
+環境変数（いずれも省略可）
+
+| 変数 | 既定値 | 用途 |
+| --- | --- | --- |
+| `EXTERNAL_USER_AGENT` | `DinosaurArchiveExhibit/1.0 (...)` | Wikimedia が要求する User-Agent |
+| `EXTERNAL_CONCURRENCY` | `4` | 外部 API への同時リクエスト数 |
+| `REFRESH_INTERVAL_MS` | `21600000` | 再取得の間隔（既定 6 時間） |
+| `DINO_CACHE_PATH` | `data/dinosaur-cache.json` | キャッシュの保存先 |
+| `WIKIPEDIA_BASE` / `WIKIDATA_BASE` / `PBDB_BASE` / `COMMONS_BASE` | 各公式ホスト | 検証用にモックへ差し替える |
+| `API_PROXY_TARGET`（frontend） | `http://backend:3000` | ローカル直起動時のプロキシ先 |
+
 ### 素材管理
 
 - 恐竜骨格素材の収集条件と記録表は [ASSET_LICENSE_TRACKER.md](ASSET_LICENSE_TRACKER.md) を参照

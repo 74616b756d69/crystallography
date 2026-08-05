@@ -3,6 +3,8 @@ import './styles.css';
 import { WORLD_OUTLINE_PATHS } from './data/worldOutline';
 import { mountBackgroundScene } from './three/backgroundScene';
 import { mountGlobe, type GlobeHandle, type GlobeMarker } from './three/globeScene';
+import { renderSizeChart } from './ui/sizeChart';
+import { renderTimeline } from './ui/timeline';
 
 type GeoPoint = {
   lat: number;
@@ -44,13 +46,27 @@ type LocalityDetail = LocalitySummary & {
   note: string;
 };
 
+type GalleryImage = {
+  url: string;
+  thumbUrl: string;
+  credit?: string;
+  license?: string;
+  sourceUrl?: string;
+};
+
 type DinosaurDetail = Omit<DinosaurSummary, 'localities'> & {
   meaning: string;
   ageMa: string;
+  ageStartMa?: number;
+  ageEndMa?: number;
   lengthMeters: number;
   massEstimateKg: number;
   significance: string;
+  namedBy?: string;
+  taxonomy?: string[];
+  occurrenceCount?: number;
   imageUrl?: string;
+  images?: GalleryImage[];
   localities: LocalityDetail[];
   references: ReferenceEntry[];
 };
@@ -191,6 +207,14 @@ app.innerHTML = `
         </form>
       </section>
 
+      <section class="panel" aria-label="生息年代タイムライン">
+        <div class="panel-head">
+          <h2>ERA TIMELINE</h2>
+          <span class="panel-tag">生息年代 / 中生代</span>
+        </div>
+        <div id="timeline-mount" class="timeline-mount"></div>
+      </section>
+
       <section class="catalog-section" aria-label="恐竜カード一覧">
         <div class="catalog-headline">
           <h2 id="catalog-title">SPECIMEN INDEX / 全0種</h2>
@@ -223,6 +247,7 @@ const ui = {
   resultStatus: document.querySelector<HTMLElement>('#result-status'),
   detailPanel: document.querySelector<HTMLElement>('#detail-panel'),
   catalogGrid: document.querySelector<HTMLElement>('#catalog-grid'),
+  timelineMount: document.querySelector<HTMLElement>('#timeline-mount'),
 };
 
 if (
@@ -238,7 +263,8 @@ if (
   !ui.resultCount ||
   !ui.resultStatus ||
   !ui.detailPanel ||
-  !ui.catalogGrid
+  !ui.catalogGrid ||
+  !ui.timelineMount
 ) {
   throw new Error('Required UI elements are missing.');
 }
@@ -257,17 +283,20 @@ const uiElements = {
   resultStatus: ui.resultStatus,
   detailPanel: ui.detailPanel,
   catalogGrid: ui.catalogGrid,
+  timelineMount: ui.timelineMount,
 };
 
 const state: {
   records: NotebookRecord[];
   filteredRecords: NotebookRecord[];
   selectedRecordId: string | null;
+  galleryIndex: number;
   filters: Filters;
 } = {
   records: [],
   filteredRecords: [],
   selectedRecordId: null,
+  galleryIndex: 0,
   filters: {
     keyword: '',
     era: 'すべて',
@@ -304,20 +333,13 @@ function escapeHtml(value: string): string {
     .replaceAll("'", '&#39;');
 }
 
-async function fetchDinosaurs(): Promise<DinosaurSummary[]> {
-  const response = await fetch('/api/dinosaurs');
+/** 100種ぶんの詳細を1往復で受け取る。 */
+async function fetchAllDetails(): Promise<DinosaurDetail[]> {
+  const response = await fetch('/api/dinosaurs/all');
   if (!response.ok) {
-    throw new Error('恐竜一覧の取得に失敗しました。');
+    throw new Error('図鑑データの取得に失敗しました。');
   }
-  return (await response.json()) as DinosaurSummary[];
-}
-
-async function fetchDetail(id: string): Promise<DinosaurDetail> {
-  const response = await fetch(`/api/dinosaurs/${encodeURIComponent(id)}`);
-  if (!response.ok) {
-    throw new Error('恐竜詳細の取得に失敗しました。');
-  }
-  return (await response.json()) as DinosaurDetail;
+  return (await response.json()) as DinosaurDetail[];
 }
 
 function populateSelect(select: HTMLSelectElement, options: string[]): void {
@@ -529,6 +551,15 @@ function formatMass(mass: number): string {
   return `${Math.round(mass).toLocaleString()}kg`;
 }
 
+/** 外部APIが応答しなかったときの英語プレースホルダを日本語表記に寄せる。 */
+function formatPeriod(period: string): string {
+  return period === 'Period data unavailable' ? '年代データ未取得' : period;
+}
+
+function formatAge(ageMa: string): string {
+  return ageMa === 'Age data unavailable' ? '未取得' : ageMa;
+}
+
 function buildMapMarker(locality: LocalityDetail): string {
   const viewBoxWidth = 100;
   const viewBoxHeight = 52;
@@ -564,11 +595,15 @@ function renderMapSvg(localities: LocalityDetail[]): string {
 }
 
 function renderCardImage(record: NotebookRecord): string {
-  if (record.imageUrl) {
+  const primary = record.images?.[0]?.thumbUrl ?? record.imageUrl;
+  const count = record.images?.length ?? 0;
+
+  if (primary) {
     return `
       <div class="specimen-frame">
-        <img src="${escapeHtml(record.imageUrl)}" alt="${escapeHtml(record.nameEn)}" loading="lazy" />
+        <img src="${escapeHtml(primary)}" alt="${escapeHtml(record.nameEn)}" loading="lazy" />
         <span class="scan-line" aria-hidden="true"></span>
+        ${count > 1 ? `<span class="specimen-count">${count} IMAGES</span>` : ''}
       </div>
     `;
   }
@@ -618,6 +653,14 @@ function renderCard(record: NotebookRecord, index: number): string {
         <div>
           <dt>CLASS</dt>
           <dd>${escapeHtml(record.dietLabel)} / ${escapeHtml(record.classificationLabel)}</dd>
+        </div>
+        <div>
+          <dt>NAMED BY</dt>
+          <dd>${escapeHtml(record.namedBy ?? '未取得')}</dd>
+        </div>
+        <div>
+          <dt>OCCURRENCES</dt>
+          <dd>${record.occurrenceCount ? `${record.occurrenceCount.toLocaleString()} 件` : '未取得'}</dd>
         </div>
       </dl>
 
@@ -694,6 +737,68 @@ function renderGlobeStage(record: NotebookRecord): string {
   `;
 }
 
+function renderCredit(image: GalleryImage | undefined): string {
+  if (!image) {
+    return '';
+  }
+
+  const pieces = [image.credit, image.license].filter((value): value is string => Boolean(value));
+  const text = pieces.length > 0 ? pieces.join(' / ') : 'Wikimedia Commons';
+  return image.sourceUrl
+    ? `<a href="${escapeHtml(image.sourceUrl)}" target="_blank" rel="noreferrer">${escapeHtml(text)}</a>`
+    : escapeHtml(text);
+}
+
+/** 1種につき複数枚をサムネイル切り替えで見せる。 */
+function renderGallery(record: NotebookRecord): string {
+  const images = record.images ?? [];
+
+  if (images.length === 0) {
+    return `
+      <div class="detail-image-frame">
+        <div class="gallery-empty"><p class="specimen-caption">NO VISUAL DATA</p></div>
+      </div>
+    `;
+  }
+
+  const index = Math.min(state.galleryIndex, images.length - 1);
+  const active = images[index];
+  const thumbs = images
+    .map(
+      (image, imageIndex) => `
+        <button
+          type="button"
+          class="gallery-thumb${imageIndex === index ? ' is-active' : ''}"
+          data-gallery-index="${imageIndex}"
+          aria-label="画像 ${imageIndex + 1} を表示"
+        >
+          <img src="${escapeHtml(image.thumbUrl)}" alt="" loading="lazy" />
+        </button>
+      `,
+    )
+    .join('');
+
+  return `
+    <div class="detail-image-frame">
+      <div class="gallery-main">
+        <img id="gallery-main-image" src="${escapeHtml(active.url)}" alt="${escapeHtml(record.nameEn)}" loading="lazy" />
+        <span class="scan-line" aria-hidden="true"></span>
+        <span class="gallery-counter">${index + 1} / ${images.length}</span>
+      </div>
+      ${images.length > 1 ? `<div class="gallery-thumbs">${thumbs}</div>` : ''}
+      <p class="detail-image-caption" id="gallery-credit">SOURCE: ${renderCredit(active)}</p>
+    </div>
+  `;
+}
+
+function renderTaxonomy(record: NotebookRecord): string {
+  const levels = record.taxonomy ?? [];
+  if (levels.length === 0) {
+    return '';
+  }
+  return `<ol class="taxonomy-path">${levels.map((level) => `<li>${escapeHtml(level)}</li>`).join('')}</ol>`;
+}
+
 function mountDetailGlobe(record: NotebookRecord): void {
   activeGlobe?.dispose();
   activeGlobe = null;
@@ -721,18 +826,11 @@ function renderDetailPanel(): void {
     uiElements.detailPanel.innerHTML = `
       <div class="detail-panel-empty">
         <p class="detail-kicker">DETAIL VIEWER // 詳細ビューア</p>
-        <p class="detail-empty">一覧のカードを選択すると、産地の 3D プロジェクションと文献データをここに展開します。</p>
+        <p class="detail-empty">一覧のカード、または上のタイムラインを選択すると、写真・産地の 3D プロジェクション・文献データをここに展開します。</p>
       </div>
     `;
     return;
   }
-
-  const detailImageHtml = record.imageUrl
-    ? `<div class="detail-image-frame">
-        <img src="${escapeHtml(record.imageUrl)}" alt="${escapeHtml(record.nameEn)}" class="detail-image" loading="lazy" />
-        <p class="detail-image-caption">SOURCE: Wikipedia / Wikimedia Commons</p>
-      </div>`
-    : '';
 
   uiElements.detailPanel.innerHTML = `
     <article class="detail-sheet">
@@ -740,13 +838,13 @@ function renderDetailPanel(): void {
         <div>
           <p class="detail-kicker">DETAIL VIEWER // 詳細ビューア</p>
           <h3>${escapeHtml(record.nameJa)}</h3>
-          <p class="detail-scientific">${escapeHtml(record.nameEn)}</p>
+          <p class="detail-scientific">${escapeHtml(record.nameEn)}${record.namedBy ? ` — ${escapeHtml(record.namedBy)}` : ''}</p>
         </div>
         <button type="button" class="detail-close" data-detail-close="true">CLOSE</button>
       </div>
 
-      <div class="detail-hero${detailImageHtml ? '' : ' detail-hero--solo'}">
-        ${detailImageHtml}
+      <div class="detail-hero">
+        ${renderGallery(record)}
         ${renderGlobeStage(record)}
       </div>
 
@@ -755,36 +853,65 @@ function renderDetailPanel(): void {
         <aside class="detail-research-note">${escapeHtml(record.noteText)}</aside>
       </div>
 
+      <section class="detail-box detail-size">
+        <h4>SIZE COMPARISON / 大きさ比較</h4>
+        ${renderSizeChart(record.lengthMeters, record.massEstimateKg)}
+      </section>
+
       <div class="detail-meta-grid">
         <section class="detail-box">
-          <h4>RESEARCH LOG / 研究メモ</h4>
-          <p>${escapeHtml(record.significance)}</p>
+          <h4>CLASSIFICATION / 分類</h4>
+          ${renderTaxonomy(record)}
+          <dl class="detail-stats">
+            <div><dt>MEANING</dt><dd>${escapeHtml(record.meaning)}</dd></div>
+            <div><dt>DIET</dt><dd>${escapeHtml(record.dietLabel)}</dd></div>
+          </dl>
         </section>
         <section class="detail-box">
           <h4>CORE DATA / 基本データ</h4>
           <dl class="detail-stats">
-            <div><dt>PERIOD</dt><dd>${escapeHtml(record.period)}</dd></div>
-            <div><dt>AGE</dt><dd>${escapeHtml(record.ageMa)}</dd></div>
+            <div><dt>PERIOD</dt><dd>${escapeHtml(formatPeriod(record.period))}</dd></div>
+            <div><dt>AGE</dt><dd>${escapeHtml(formatAge(record.ageMa))}</dd></div>
             <div><dt>LENGTH</dt><dd>${escapeHtml(`${record.lengthMeters.toFixed(1)}m`)}</dd></div>
             <div><dt>MASS</dt><dd>${escapeHtml(formatMass(record.massEstimateKg))}</dd></div>
+            <div><dt>NAMED BY</dt><dd>${escapeHtml(record.namedBy ?? '未取得')}</dd></div>
+            <div><dt>OCCURRENCES</dt><dd>${record.occurrenceCount ? `${record.occurrenceCount.toLocaleString()} 件` : '未取得'}</dd></div>
           </dl>
         </section>
       </div>
 
       <div class="detail-meta-grid">
         <section class="detail-box">
+          <h4>RESEARCH LOG / 研究メモ</h4>
+          <p>${escapeHtml(record.significance)}</p>
+        </section>
+        <section class="detail-box">
           <h4>SITE INDEX / 産地</h4>
           ${renderLocalityNotes(record)}
         </section>
-        <section class="detail-box">
-          <h4>REFERENCES / 文献</h4>
-          ${renderReferences(record)}
-        </section>
       </div>
+
+      <section class="detail-box">
+        <h4>REFERENCES / 文献</h4>
+        ${renderReferences(record)}
+      </section>
     </article>
   `;
 
   mountDetailGlobe(record);
+}
+
+function renderTimelinePanel(): void {
+  uiElements.timelineMount.innerHTML = renderTimeline(
+    state.filteredRecords.map((record) => ({
+      id: record.id,
+      nameJa: record.nameJa,
+      ageStartMa: record.ageStartMa,
+      ageEndMa: record.ageEndMa,
+      dietLabel: record.dietLabel,
+    })),
+    state.selectedRecordId,
+  );
 }
 
 function renderCatalog(): void {
@@ -794,6 +921,7 @@ function renderCatalog(): void {
     hudRecords.textContent = String(state.records.length).padStart(3, '0');
   }
   renderDetailPanel();
+  renderTimelinePanel();
 
   if (state.filteredRecords.length === 0) {
     uiElements.catalogGrid.innerHTML = '<p class="empty-state">NO MATCHING RECORDS / 該当する記録がありません</p>';
@@ -821,8 +949,7 @@ function renderControls(): void {
 async function bootstrap(): Promise<void> {
   try {
     uiElements.resultStatus.textContent = 'アーカイブからレコードを取得中…';
-    const summaries = await fetchDinosaurs();
-    const details = await Promise.all(summaries.map((summary) => fetchDetail(summary.id)));
+    const details = await fetchAllDetails();
     state.records = details.map(toNotebookRecord);
     state.filteredRecords = [...state.records];
     state.selectedRecordId = null;
@@ -882,6 +1009,13 @@ uiElements.catalogGrid.addEventListener(
   { passive: true },
 );
 
+function selectRecord(recordId: string | null): void {
+  state.selectedRecordId = recordId;
+  state.galleryIndex = 0;
+  renderCatalog();
+  uiElements.detailPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 uiElements.form.addEventListener('submit', (event) => {
   event.preventDefault();
   state.filters = readFilters();
@@ -930,9 +1064,7 @@ uiElements.catalogGrid.addEventListener('click', (event) => {
     return;
   }
 
-  state.selectedRecordId = trigger.dataset.recordId ?? null;
-  renderCatalog();
-  uiElements.detailPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  selectRecord(trigger.dataset.recordId ?? null);
 });
 
 uiElements.catalogGrid.addEventListener('keydown', (event) => {
@@ -951,9 +1083,63 @@ uiElements.catalogGrid.addEventListener('keydown', (event) => {
   }
 
   event.preventDefault();
-  state.selectedRecordId = trigger.dataset.recordId ?? null;
-  renderCatalog();
-  uiElements.detailPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  selectRecord(trigger.dataset.recordId ?? null);
+});
+
+/** タイムラインのバーからも同じ詳細ビューアを開く。 */
+uiElements.timelineMount.addEventListener('click', (event) => {
+  const target = event.target;
+  if (!(target instanceof Element)) {
+    return;
+  }
+
+  const bar = target.closest('[data-record-id]');
+  const recordId = bar?.getAttribute('data-record-id');
+  if (recordId) {
+    selectRecord(recordId);
+  }
+});
+
+/** ギャラリーのサムネイル切り替え。地球儀を作り直さないよう部分更新にする。 */
+uiElements.detailPanel.addEventListener('click', (event) => {
+  const target = event.target;
+  if (!(target instanceof Element)) {
+    return;
+  }
+
+  const thumb = target.closest<HTMLElement>('[data-gallery-index]');
+  if (!thumb) {
+    return;
+  }
+
+  const record = state.records.find((entry) => entry.id === state.selectedRecordId);
+  const images = record?.images ?? [];
+  const index = Number(thumb.dataset.galleryIndex);
+  const image = images[index];
+  if (!image) {
+    return;
+  }
+
+  state.galleryIndex = index;
+
+  const mainImage = uiElements.detailPanel.querySelector<HTMLImageElement>('#gallery-main-image');
+  if (mainImage) {
+    mainImage.src = image.url;
+  }
+
+  const credit = uiElements.detailPanel.querySelector<HTMLElement>('#gallery-credit');
+  if (credit) {
+    credit.innerHTML = `SOURCE: ${renderCredit(image)}`;
+  }
+
+  const counter = uiElements.detailPanel.querySelector<HTMLElement>('.gallery-counter');
+  if (counter) {
+    counter.textContent = `${index + 1} / ${images.length}`;
+  }
+
+  uiElements.detailPanel.querySelectorAll('.gallery-thumb').forEach((element, elementIndex) => {
+    element.classList.toggle('is-active', elementIndex === index);
+  });
 });
 
 uiElements.detailPanel.addEventListener('click', (event) => {

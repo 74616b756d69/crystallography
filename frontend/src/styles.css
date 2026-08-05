@@ -983,6 +983,253 @@ input[type='range']::-moz-range-thumb {
   color: var(--text-dim);
 }
 
+
+/* ---------- era timeline ---------- */
+
+.timeline-mount {
+  display: grid;
+  gap: 10px;
+}
+
+.timeline-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid rgba(69, 224, 255, 0.16);
+  background: rgba(2, 8, 16, 0.6);
+}
+
+.timeline-band rect {
+  fill: rgba(69, 224, 255, 0.04);
+  stroke: rgba(69, 224, 255, 0.14);
+  stroke-width: 0.6;
+}
+
+.timeline-band-1 rect {
+  fill: rgba(255, 79, 216, 0.045);
+}
+
+.timeline-band-2 rect {
+  fill: rgba(255, 201, 74, 0.05);
+}
+
+.timeline-band text {
+  fill: var(--cyan-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-anchor: middle;
+}
+
+.timeline-tick line {
+  stroke: rgba(69, 224, 255, 0.12);
+  stroke-width: 0.6;
+  stroke-dasharray: 3 4;
+}
+
+.timeline-tick text {
+  fill: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  text-anchor: middle;
+}
+
+.timeline-bar {
+  fill: var(--cyan);
+  opacity: 0.55;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.timeline-bar:hover {
+  opacity: 1;
+}
+
+.timeline-bar.diet-肉食 {
+  fill: var(--magenta);
+}
+
+.timeline-bar.diet-草食 {
+  fill: var(--lime);
+}
+
+.timeline-bar.diet-雑食 {
+  fill: var(--amber);
+}
+
+.timeline-bar.is-selected {
+  fill: #fff;
+  opacity: 1;
+}
+
+.timeline-note {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+}
+
+/* ---------- gallery ---------- */
+
+.gallery-main {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  background: rgba(2, 8, 16, 0.8);
+}
+
+.gallery-main img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: saturate(0.72) contrast(1.08);
+}
+
+.gallery-counter {
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  background: rgba(2, 8, 16, 0.75);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: var(--cyan);
+}
+
+.gallery-empty {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 4 / 3;
+}
+
+.gallery-thumbs {
+  display: flex;
+  gap: 6px;
+  padding: 8px;
+  overflow-x: auto;
+  border-top: 1px solid var(--line);
+}
+
+.gallery-thumb {
+  flex: 0 0 auto;
+  width: 62px;
+  height: 46px;
+  padding: 0;
+  border: 1px solid rgba(69, 224, 255, 0.25);
+  background: none;
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.gallery-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.gallery-thumb:hover,
+.gallery-thumb.is-active {
+  opacity: 1;
+  border-color: var(--cyan);
+  box-shadow: 0 0 14px rgba(69, 224, 255, 0.35);
+}
+
+.specimen-count {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  background: rgba(2, 8, 16, 0.78);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  color: var(--cyan);
+}
+
+/* ---------- size comparison ---------- */
+
+.detail-size {
+  margin-top: 20px;
+}
+
+.size-svg {
+  display: block;
+  width: 100%;
+  max-width: 680px;
+  margin-top: 6px;
+}
+
+.size-baseline {
+  stroke: rgba(69, 224, 255, 0.35);
+  stroke-width: 1;
+}
+
+.size-tick line {
+  stroke: rgba(69, 224, 255, 0.3);
+  stroke-width: 1;
+}
+
+.size-tick text {
+  fill: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  text-anchor: middle;
+}
+
+.size-bar {
+  fill: rgba(69, 224, 255, 0.25);
+  stroke: var(--cyan);
+  stroke-width: 1;
+}
+
+.size-bar-label {
+  fill: var(--heading);
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.size-human {
+  fill: var(--amber);
+}
+
+.size-human-label {
+  fill: var(--amber);
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+
+/* ---------- taxonomy ---------- */
+
+.taxonomy-path {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
+  padding: 0;
+  list-style: none;
+  counter-reset: none;
+}
+
+.taxonomy-path li {
+  padding: 4px 10px;
+  border: 1px solid rgba(69, 224, 255, 0.25);
+  background: rgba(69, 224, 255, 0.06);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--text);
+}
+
+.taxonomy-path li + li::before {
+  content: '▸ ';
+  color: var(--cyan-dim);
+}
+
 /* ---------- footer ---------- */
 
 .hud-footer {
