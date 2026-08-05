@@ -46,6 +46,7 @@ type DinosaurDetail = Omit<DinosaurSummary, 'localities'> & {
   lengthMeters: number;
   massEstimateKg: number;
   significance: string;
+  imageUrl?: string;
   localities: LocalityDetail[];
   references: ReferenceEntry[];
 };
@@ -297,15 +298,29 @@ function populateSelect(select: HTMLSelectElement, options: string[]): void {
 function mapPeriodToEra(period: string): EraOption {
   const value = period.toLowerCase();
 
-  if (value.includes('norian') || value.includes('rhaetian')) {
+  if (
+    value.includes('triassic') ||
+    value.includes('carnian') ||
+    value.includes('norian') ||
+    value.includes('rhaetian') ||
+    value.includes('ladinian') ||
+    value.includes('anisian')
+  ) {
     return '三畳紀';
   }
 
-  if (value.includes('hettangian') || value.includes('pliensbachian')) {
+  if (
+    value.includes('hettangian') ||
+    value.includes('sinemurian') ||
+    value.includes('pliensbachian') ||
+    value.includes('toarcian') ||
+    value.includes('early jurassic')
+  ) {
     return 'ジュラ紀前期';
   }
 
   if (
+    value.includes('jurassic') ||
     value.includes('aalenian') ||
     value.includes('bajocian') ||
     value.includes('bathonian') ||
@@ -318,8 +333,10 @@ function mapPeriodToEra(period: string): EraOption {
   }
 
   if (
+    value.includes('early cretaceous') ||
     value.includes('berriasian') ||
     value.includes('valanginian') ||
+    value.includes('hauterivian') ||
     value.includes('barremian') ||
     value.includes('aptian') ||
     value.includes('albian')
@@ -535,6 +552,22 @@ function renderMapSvg(localities: LocalityDetail[]): string {
   `;
 }
 
+function renderCardImage(record: NotebookRecord): string {
+  if (record.imageUrl) {
+    return `
+      <div class="skeleton-frame skeleton-frame--image">
+        <img src="${escapeHtml(record.imageUrl)}" alt="${escapeHtml(record.nameEn)}" class="dino-image" loading="lazy" />
+      </div>
+    `;
+  }
+  return `
+    <div class="skeleton-frame">
+      <span class="skeleton-caption">骨格スケッチ（側面）</span>
+      <div class="scale-bar"><i></i><strong>2m</strong></div>
+    </div>
+  `;
+}
+
 function renderCard(record: NotebookRecord, index: number): string {
   const rotation = CARD_ROTATIONS[index % CARD_ROTATIONS.length];
   const number = String(index + 1).padStart(3, '0');
@@ -542,7 +575,8 @@ function renderCard(record: NotebookRecord, index: number): string {
   const locationText = record.localities[0]
     ? `${record.localities[0].country} / ${record.localities[0].formation}`
     : record.continentLabel;
-  const cardText = record.meaning.replace(/\s+/g, ' ').trim() || `${record.nameJa} の基本記録`;
+  const rawSummary = (record.summary || record.meaning).replace(/\s+/g, ' ').trim();
+  const cardText = rawSummary.length > 110 ? rawSummary.slice(0, 110) + '…' : rawSummary;
   const tagMarkup = record.tags
     .map(
       (tag, tagIndex) =>
@@ -557,10 +591,7 @@ function renderCard(record: NotebookRecord, index: number): string {
       <h3>${escapeHtml(record.nameJa)}</h3>
       <p class="scientific-name">${escapeHtml(record.nameEn)}</p>
 
-      <div class="skeleton-frame">
-        <span class="skeleton-caption">骨格スケッチ（側面）</span>
-        <div class="scale-bar"><i></i><strong>2m</strong></div>
-      </div>
+      ${renderCardImage(record)}
 
       <dl class="data-grid">
         <div>
@@ -652,6 +683,13 @@ function renderDetailPanel(): void {
     return;
   }
 
+  const detailImageHtml = record.imageUrl
+    ? `<div class="detail-image-frame">
+        <img src="${escapeHtml(record.imageUrl)}" alt="${escapeHtml(record.nameEn)}" class="detail-image" loading="lazy" />
+        <p class="detail-image-caption">Source: Wikipedia / Wikimedia Commons</p>
+      </div>`
+    : '';
+
   uiElements.detailPanel.innerHTML = `
     <article class="detail-sheet">
       <div class="detail-sheet-head">
@@ -662,6 +700,8 @@ function renderDetailPanel(): void {
         </div>
         <button type="button" class="detail-close" data-detail-close="true">一覧へ戻る</button>
       </div>
+
+      ${detailImageHtml}
 
       <div class="detail-summary-block">
         <p>${escapeHtml(record.summary)}</p>
@@ -764,6 +804,22 @@ uiElements.lengthRange.addEventListener('input', () => {
 
 uiElements.form.addEventListener('reset', () => {
   state.selectedRecordId = null;
+  setTimeout(() => {
+    state.filters = readFilters();
+    applyFilters();
+    renderCatalog();
+  }, 0);
+});
+
+[uiElements.eraSelect, uiElements.continentSelect, uiElements.dietSelect, uiElements.classificationSelect].forEach((select) => {
+  select.addEventListener('change', () => {
+    state.filters = readFilters();
+    applyFilters();
+    if (state.selectedRecordId && !state.filteredRecords.some((r) => r.id === state.selectedRecordId)) {
+      state.selectedRecordId = null;
+    }
+    renderCatalog();
+  });
 });
 
 uiElements.catalogGrid.addEventListener('click', (event) => {
